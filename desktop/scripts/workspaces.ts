@@ -7,7 +7,7 @@
  * @format
  */
 
-import {rootDir, pluginsDir} from './paths';
+import {rootDir, pluginsDir, fbPluginsDir} from './paths';
 import fs from 'fs-extra';
 import path from 'path';
 import {promisify} from 'util';
@@ -20,6 +20,8 @@ const glob = promisify(globImport);
 export interface Package {
   dir: string;
   json: any;
+  isPrivate: boolean;
+  isPlugin: boolean;
 }
 
 export interface Workspaces {
@@ -27,11 +29,12 @@ export interface Workspaces {
   packages: Package[];
 }
 
-function isPlugin(dir: string) {
-  return dir.startsWith(pluginsDir);
-}
-
-export async function getWorkspaces(): Promise<Workspaces> {
+async function getWorkspacesByRoot(
+  rootDir: string,
+): Promise<Workspaces | null> {
+  if (!(await fs.pathExists(path.join(rootDir, 'package.json')))) {
+    return null;
+  }
   const rootPackageJson = await fs.readJson(path.join(rootDir, 'package.json'));
   const packageGlobs = rootPackageJson.workspaces.packages as string[];
   const packages = await pmap(
@@ -48,6 +51,11 @@ export async function getWorkspaces(): Promise<Workspaces> {
       return {
         dir,
         json,
+        isPrivate: json.private || dir.startsWith(pluginsDir),
+        isPlugin:
+          json.keywords &&
+          Array.isArray(json.keywords) &&
+          json.keywords.includes('flipper-plugin'),
       };
     },
   );
@@ -55,13 +63,34 @@ export async function getWorkspaces(): Promise<Workspaces> {
     rootPackage: {
       dir: rootDir,
       json: rootPackageJson,
+      isPrivate: true,
+      isPlugin: false,
     },
     packages,
   };
 }
 
-export async function bumpVersions({newVersion}: {newVersion?: string}) {
-  return await bumpWorkspaceVersions(await getWorkspaces(), newVersion);
+export async function getWorkspaces(): Promise<Workspaces> {
+  const rootWorkspaces = await getWorkspacesByRoot(rootDir);
+  const fbWorkspaces = await getWorkspacesByRoot(fbPluginsDir);
+  if (!fbWorkspaces) {
+    return rootWorkspaces!;
+  }
+  const mergedWorkspaces: Workspaces = {
+    rootPackage: rootWorkspaces!.rootPackage,
+    packages: [...rootWorkspaces!.packages, ...fbWorkspaces.packages],
+  };
+  return mergedWorkspaces;
+}
+
+export async function bumpVersions({
+  newVersion,
+  dryRun,
+}: {
+  newVersion?: string;
+  dryRun?: boolean;
+}) {
+  return await bumpWorkspaceVersions(await getWorkspaces(), newVersion, dryRun);
 }
 
 async function savePackageJson({dir, json}: Package) {
@@ -71,6 +100,7 @@ async function savePackageJson({dir, json}: Package) {
 }
 
 function updateDependencies(
+  name: string,
   dependencies: {[key: string]: string},
   packagesToUpdate: string[],
   newVersion: string,
@@ -84,6 +114,9 @@ function updateDependencies(
       dependencies[packageName] !== undefined &&
       dependencies[packageName] !== newVersion
     ) {
+      console.log(
+        `Updated dependency of ${name}: ${packageName} from version ${dependencies[packageName]} to version ${newVersion}`,
+      );
       dependencies[packageName] = newVersion;
       updated = true;
     }
@@ -94,34 +127,60 @@ function updateDependencies(
 async function bumpWorkspaceVersions(
   {rootPackage, packages}: Workspaces,
   newVersion?: string,
+  dryRun?: boolean,
 ): Promise<string> {
   newVersion = newVersion || (rootPackage.json.version as string);
   const allPackages = [rootPackage, ...packages];
-  const localPackageNames = packages
-    .filter((pkg) => !isPlugin(pkg.dir))
-    .map(({json}) => json.name as string);
+  const localPackageNames = packages.map(({json}) => json.name as string);
   for (const pkg of allPackages) {
-    const {dir, json} = pkg;
+    const {json} = pkg;
     let changed = false;
-    if (json.version !== newVersion && !isPlugin(dir)) {
+    if (json.version && json.version !== newVersion) {
+      console.log(
+        `Bumping version of ${json.name} from ${json.version} to ${newVersion}`,
+      );
       json.version = newVersion;
       changed = true;
     }
-    if (updateDependencies(json.dependencies, localPackageNames, newVersion)) {
-      changed = true;
-    }
     if (
-      updateDependencies(json.devDependencies, localPackageNames, newVersion)
+      updateDependencies(
+        json.name,
+        json.dependencies,
+        localPackageNames,
+        newVersion,
+      )
     ) {
       changed = true;
     }
     if (
-      updateDependencies(json.peerDependencies, localPackageNames, newVersion)
+      updateDependencies(
+        json.name,
+        json.devDependencies,
+        localPackageNames,
+        newVersion,
+      )
+    ) {
+      changed = true;
+    }
+    if (
+      updateDependencies(
+        json.name,
+        json.peerDependencies,
+        localPackageNames,
+        newVersion,
+      )
     ) {
       changed = true;
     }
     if (changed) {
-      await savePackageJson(pkg);
+      if (dryRun) {
+        console.log(
+          `DRYRUN: skipping saving changed package.json for ${pkg.json.name}`,
+        );
+      } else {
+        console.log(`Saving changed package.json for ${pkg.json.name}`);
+        await savePackageJson(pkg);
+      }
     }
   }
   return newVersion;
@@ -130,19 +189,69 @@ async function bumpWorkspaceVersions(
 export async function publishPackages({
   newVersion,
   proxy,
+  dryRun,
 }: {
   newVersion?: string;
   proxy?: string;
+  dryRun?: boolean;
 }) {
   const workspaces = await getWorkspaces();
-  const version = await bumpWorkspaceVersions(workspaces, newVersion);
+  const version = await bumpWorkspaceVersions(workspaces, newVersion, dryRun);
   let cmd = `yarn publish --new-version ${version}`;
   if (proxy) {
     cmd += ` --http-proxy ${proxy} --https-proxy ${proxy}`;
   }
-  const publicPackages = workspaces.packages.filter((pkg) => !pkg.json.private);
+  const publicPackages = workspaces.packages.filter((pkg) => !pkg.isPrivate);
   for (const pkg of publicPackages) {
-    console.log(`Publishing ${pkg.json.name}...`);
-    execSync(cmd, {cwd: pkg.dir, stdio: 'inherit'});
+    if (dryRun) {
+      console.log(`DRYRUN: Skipping npm publishing for ${pkg.json.name}`);
+    } else {
+      console.log(`Publishing ${pkg.json.name}...`);
+      execSync(cmd, {cwd: pkg.dir, stdio: 'inherit'});
+    }
   }
+}
+
+export async function resolvePluginDir(name: string): Promise<string> {
+  const pluginDir =
+    (await resolvePluginByNameOrId(name)) ?? (await resolvePluginByPath(name));
+  if (!pluginDir) {
+    throw new Error(`Cannot find plugin by name or dir ${name}`);
+  } else {
+    return pluginDir;
+  }
+}
+
+async function resolvePluginByNameOrId(
+  pluginName: string,
+): Promise<string | undefined> {
+  const workspaces = await getWorkspaces();
+  const pluginDir = workspaces.packages
+    .filter((p) => p.isPlugin)
+    .find(
+      (p) =>
+        p.json.name === pluginName ||
+        p.json.id === pluginName ||
+        p.json.name === `flipper-plugin-${pluginName}`,
+    )?.dir;
+  return pluginDir;
+}
+
+async function resolvePluginByPath(dir: string): Promise<string | undefined> {
+  if (path.isAbsolute(dir)) {
+    if (await fs.pathExists(dir)) {
+      return dir;
+    } else {
+      return undefined;
+    }
+  }
+  const resolvedFromPluginDir = path.resolve(pluginsDir, dir);
+  if (await fs.pathExists(resolvedFromPluginDir)) {
+    return resolvedFromPluginDir;
+  }
+  const resolvedFromCwd = path.resolve(process.cwd(), dir);
+  if (await fs.pathExists(resolvedFromCwd)) {
+    return resolvedFromCwd;
+  }
+  return undefined;
 }

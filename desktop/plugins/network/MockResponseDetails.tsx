@@ -10,7 +10,8 @@
 import {
   FlexRow,
   FlexColumn,
-  FlexBox,
+  Layout,
+  Button,
   Input,
   Text,
   Tabs,
@@ -42,7 +43,7 @@ const StyledSelectContainer = styled(FlexRow)({
 
 const StyledSelect = styled(Select)({
   height: '100%',
-  maxWidth: 200,
+  maxWidth: 400,
 });
 
 const StyledText = styled(Text)({
@@ -53,7 +54,7 @@ const StyledText = styled(Text)({
 const textAreaStyle: React.CSSProperties = {
   width: '100%',
   marginTop: 8,
-  height: 300,
+  height: 400,
   fontSize: 15,
   color: '#333',
   padding: 10,
@@ -102,39 +103,28 @@ const Warning = styled(FlexRow)({
   marginTop: 8,
 });
 
-const AddHeaderButton = styled(FlexBox)({
-  color: colors.blackAlpha50,
-  marginTop: 8,
-  alignItems: 'center',
-  padding: 10,
-  flexShrink: 0,
-  whiteSpace: 'nowrap',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-});
-
 const HeadersColumnSizes = {
-  name: '40%',
-  value: '40%',
-  close: '10%',
-  warning: 'flex',
+  close: '4%',
+  warning: '4%',
+  name: '35%',
+  value: 'flex',
 };
 
 const HeadersColumns = {
-  name: {
-    value: 'Name',
-    resizable: false,
-  },
-  value: {
-    value: 'Value',
-    resizable: false,
-  },
   close: {
     value: '',
     resizable: false,
   },
   warning: {
     value: '',
+    resizable: false,
+  },
+  name: {
+    value: 'Name',
+    resizable: false,
+  },
+  value: {
+    value: 'Value',
     resizable: false,
   },
 };
@@ -209,7 +199,7 @@ function _buildMockResponseHeaderRows(
         },
         close: {
           value: (
-            <FlexBox
+            <Layout.Container
               onClick={() => {
                 const newHeaders = produce(
                   route.responseHeaders,
@@ -222,7 +212,7 @@ function _buildMockResponseHeaderRows(
                 });
               }}>
               <HeaderGlyph name="cross-circle" color={colors.red} />
-            </FlexBox>
+            </Layout.Container>
           ),
         },
       },
@@ -239,7 +229,15 @@ export function MockResponseDetails({id, route, isDuplicated}: Props) {
   );
   const [nextHeaderId, setNextHeaderId] = useState(0);
 
-  const {requestUrl, requestMethod, responseData} = route;
+  const {requestUrl, requestMethod, responseData, responseStatus} = route;
+
+  let formattedResponse = '';
+  try {
+    formattedResponse = JSON.stringify(JSON.parse(responseData), null, 2);
+  } catch (e) {
+    formattedResponse = responseData;
+  }
+
   return (
     <Container>
       <FlexRow style={{width: '100%'}}>
@@ -260,6 +258,18 @@ export function MockResponseDetails({id, route, isDuplicated}: Props) {
           onChange={(event) =>
             networkRouteManager.modifyRoute(id, {
               requestUrl: event.target.value,
+            })
+          }
+        />
+      </FlexRow>
+      <FlexRow style={{width: '20%'}}>
+        <StyledInput
+          type="text"
+          placeholder="STATUS"
+          value={responseStatus}
+          onChange={(event) =>
+            networkRouteManager.modifyRoute(id, {
+              responseStatus: event.target.value,
             })
           }
         />
@@ -286,7 +296,7 @@ export function MockResponseDetails({id, route, isDuplicated}: Props) {
             wrap="soft"
             autoComplete="off"
             spellCheck={false}
-            value={responseData}
+            value={formattedResponse}
             onChange={(event) =>
               networkRouteManager.modifyRoute(id, {
                 responseData: event.target.value,
@@ -295,46 +305,46 @@ export function MockResponseDetails({id, route, isDuplicated}: Props) {
           />
         </Tab>
         <Tab key={'headers'} label={'Headers'}>
-          <FlexColumn>
-            <ManagedTable
-              hideHeader={true}
-              multiline={true}
-              columnSizes={HeadersColumnSizes}
-              columns={HeadersColumns}
-              rows={_buildMockResponseHeaderRows(
-                id,
-                route,
-                selectedHeaderIds.length === 1 ? selectedHeaderIds[0] : null,
-                networkRouteManager,
-              )}
-              stickyBottom={true}
-              autoHeight={true}
-              floating={false}
-              // height={300}
-              zebra={false}
-              onRowHighlighted={setSelectedHeaderIds}
-              highlightedRows={new Set(selectedHeaderIds)}
-            />
-          </FlexColumn>
-          <AddHeaderButton
-            onClick={() => {
-              const newHeaders = {
-                ...route.responseHeaders,
-                [nextHeaderId.toString()]: {key: '', value: ''},
-              };
-              setNextHeaderId(nextHeaderId + 1);
-              networkRouteManager.modifyRoute(id, {
-                responseHeaders: newHeaders,
-              });
-            }}>
-            <Glyph
-              name="plus-circle"
-              size={16}
-              variant="outline"
-              color={colors.blackAlpha30}
-            />
-            &nbsp;Add Header
-          </AddHeaderButton>
+          <Layout.Container style={{width: '100%'}}>
+            <Layout.Horizontal>
+              <Button
+                onClick={() => {
+                  const newHeaders = {
+                    ...route.responseHeaders,
+                    [nextHeaderId.toString()]: {key: '', value: ''},
+                  };
+                  setNextHeaderId(nextHeaderId + 1);
+                  networkRouteManager.modifyRoute(id, {
+                    responseHeaders: newHeaders,
+                  });
+                }}
+                compact
+                padded
+                style={{marginBottom: 10}}>
+                Add Header
+              </Button>
+            </Layout.Horizontal>
+            <Layout.ScrollContainer>
+              <ManagedTable
+                hideHeader={true}
+                multiline={true}
+                columnSizes={HeadersColumnSizes}
+                columns={HeadersColumns}
+                rows={_buildMockResponseHeaderRows(
+                  id,
+                  route,
+                  selectedHeaderIds.length === 1 ? selectedHeaderIds[0] : null,
+                  networkRouteManager,
+                )}
+                stickyBottom={true}
+                autoHeight={true}
+                floating={false}
+                zebra={false}
+                onRowHighlighted={setSelectedHeaderIds}
+                highlightedRows={new Set(selectedHeaderIds)}
+              />
+            </Layout.ScrollContainer>
+          </Layout.Container>
         </Tab>
       </Tabs>
     </Container>

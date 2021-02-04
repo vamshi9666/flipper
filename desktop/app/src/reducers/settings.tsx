@@ -21,12 +21,14 @@ export type Settings = {
   androidHome: string;
   enableAndroid: boolean;
   enableIOS: boolean;
+  enablePhysicalIOS: boolean;
   /**
    * If unset, this will assume the value of the GK setting.
    * Note that this setting has no effect in the open source version
    * of Flipper.
    */
   enablePrefetching: Tristate;
+  idbPath: string;
   jsApps: {
     webAppLauncher: {
       url: string;
@@ -41,6 +43,8 @@ export type Settings = {
       openDevMenu: string;
     };
   };
+  darkMode: boolean;
+  showWelcomeAtStartup: boolean;
 };
 
 export type Action =
@@ -56,7 +60,9 @@ const initialState: Settings = {
   androidHome: getDefaultAndroidSdkPath(),
   enableAndroid: true,
   enableIOS: os.platform() === 'darwin',
+  enablePhysicalIOS: os.platform() === 'darwin',
   enablePrefetching: Tristate.Unset,
+  idbPath: '/usr/local/bin/idb',
   jsApps: {
     webAppLauncher: {
       url: 'http://localhost:8888',
@@ -71,6 +77,8 @@ const initialState: Settings = {
       openDevMenu: 'Alt+Shift+D',
     },
   },
+  darkMode: false,
+  showWelcomeAtStartup: true,
 };
 
 export default function reducer(

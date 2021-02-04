@@ -8,84 +8,79 @@
  */
 
 import React from 'react';
-import Client from '../../Client';
 import {create, act, ReactTestRenderer} from 'react-test-renderer';
-import configureStore from 'redux-mock-store';
 import {Provider} from 'react-redux';
-import {default as BaseDevice} from '../../devices/BaseDevice';
 import ExportDataPluginSheet from '../ExportDataPluginSheet';
 import {FlipperPlugin, FlipperDevicePlugin} from '../../plugin';
+import {getExportablePlugins, getPluginKey} from '../../utils/pluginUtils';
+import {createMockFlipperWithPlugin} from '../../test-utils/createMockFlipperWithPlugin';
+import {setPluginState} from '../../reducers/pluginStates';
 
-function generateClientIdentifier(device: BaseDevice, app: string): string {
-  const {os, deviceType, serial} = device;
-  const identifier = `${app}#${os}#${deviceType}#${serial}`;
-  return identifier;
+class TestPlugin extends FlipperPlugin<any, any, any> {
+  static details = {
+    title: 'TestPlugin',
+    id: 'TestPlugin',
+  } as any;
 }
-
-class TestPlugin extends FlipperPlugin<any, any, any> {}
 TestPlugin.title = 'TestPlugin';
 TestPlugin.id = 'TestPlugin';
 TestPlugin.defaultPersistedState = {msg: 'Test plugin'};
-class TestDevicePlugin extends FlipperDevicePlugin<any, any, any> {}
+
+class TestDevicePlugin extends FlipperDevicePlugin<any, any, any> {
+  static details = {
+    title: 'TestDevicePlugin',
+    id: 'TestDevicePlugin',
+  } as any;
+
+  static supportsDevice() {
+    return true;
+  }
+}
 TestDevicePlugin.title = 'TestDevicePlugin';
 TestDevicePlugin.id = 'TestDevicePlugin';
 TestDevicePlugin.defaultPersistedState = {msg: 'TestDevicePlugin'};
 
-function getStore(selectedPlugins: Array<string>) {
-  const logger = {
-    track: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    debug: () => {},
-    trackTimeSince: () => {},
-  };
-  let mockStore = configureStore([])();
-  const selectedDevice = new BaseDevice(
-    'serial',
-    'emulator',
-    'TestiPhone',
-    'iOS',
-  );
-  const client = new Client(
-    generateClientIdentifier(selectedDevice, 'app'),
-    {app: 'app', os: 'iOS', device: 'TestiPhone', device_id: 'serial'},
-    null,
-    logger,
-    // @ts-ignore
-    mockStore,
-    ['TestPlugin', 'TestDevicePlugin'],
-  );
-
-  const pluginStates: {[key: string]: any} = {};
-  pluginStates[`${client.id}#TestDevicePlugin`] = {
-    msg: 'Test Device plugin',
-  };
-  pluginStates[`${client.id}#TestPlugin`] = {
-    msg: 'Test plugin',
-  };
-  mockStore = configureStore([])({
-    application: {share: {closeOnFinish: false, type: 'link'}},
-    plugins: {
-      clientPlugins: new Map([['TestPlugin', TestPlugin]]),
-      devicePlugins: new Map([['TestDevicePlugin', TestDevicePlugin]]),
-      gatekeepedPlugins: [],
-      disabledPlugins: [],
-      failedPlugins: [],
-      selectedPlugins,
-    },
-    pluginStates,
-    pluginMessageQueue: [],
-    connections: {selectedApp: client.id, clients: [client]},
-  });
-  return mockStore;
-}
-
 test('SettingsSheet snapshot with nothing enabled', async () => {
   let root: ReactTestRenderer;
+  const {
+    store,
+    togglePlugin,
+    client,
+    device,
+    pluginKey,
+  } = await createMockFlipperWithPlugin(TestPlugin, {
+    additionalPlugins: [TestDevicePlugin],
+  });
+
+  togglePlugin();
+
+  store.dispatch(
+    setPluginState({
+      pluginKey,
+      state: {test: '1'},
+    }),
+  );
+
+  expect(getExportablePlugins(store.getState(), device, client)).toEqual([]);
+
+  // makes device plugin visible
+  store.dispatch(
+    setPluginState({
+      pluginKey: getPluginKey(undefined, device, 'TestDevicePlugin'),
+      state: {test: '1'},
+    }),
+  );
+
+  expect(getExportablePlugins(store.getState(), device, client)).toEqual([
+    {
+      id: 'TestDevicePlugin',
+      label: 'TestDevicePlugin',
+    },
+  ]);
+
   await act(async () => {
     root = create(
-      <Provider store={getStore([])}>
+      <Provider store={store}>
         <ExportDataPluginSheet onHide={() => {}} />
       </Provider>,
     );
@@ -96,9 +91,42 @@ test('SettingsSheet snapshot with nothing enabled', async () => {
 
 test('SettingsSheet snapshot with one plugin enabled', async () => {
   let root: ReactTestRenderer;
+  const {store, device, client, pluginKey} = await createMockFlipperWithPlugin(
+    TestPlugin,
+    {
+      additionalPlugins: [TestDevicePlugin],
+    },
+  );
+
+  // enabled, but no data
+  expect(getExportablePlugins(store.getState(), device, client)).toEqual([]);
+
+  store.dispatch(
+    setPluginState({
+      pluginKey,
+      state: {test: '1'},
+    }),
+  );
+  store.dispatch(
+    setPluginState({
+      pluginKey: getPluginKey(undefined, device, 'TestDevicePlugin'),
+      state: {test: '1'},
+    }),
+  );
+  expect(getExportablePlugins(store.getState(), device, client)).toEqual([
+    {
+      id: 'TestDevicePlugin',
+      label: 'TestDevicePlugin',
+    },
+    {
+      id: 'TestPlugin',
+      label: 'TestPlugin',
+    },
+  ]);
+
   await act(async () => {
     root = create(
-      <Provider store={getStore(['TestPlugin'])}>
+      <Provider store={store}>
         <ExportDataPluginSheet onHide={() => {}} />
       </Provider>,
     );

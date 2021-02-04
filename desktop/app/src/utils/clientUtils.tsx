@@ -7,8 +7,8 @@
  * @format
  */
 
-import Client from '../Client';
-import BaseDevice from '../devices/BaseDevice';
+import type Client from '../Client';
+import type BaseDevice from '../devices/BaseDevice';
 
 /* A Client uniuely identifies an app running on some device.
 
@@ -72,14 +72,16 @@ export function buildClientId(clientInfo: {
       );
     }
   }
-  return `${clientInfo.app}#${clientInfo.os}#${clientInfo.device}#${clientInfo.device_id}`;
+  const escapedName = escape(clientInfo.app);
+  return `${escapedName}#${clientInfo.os}#${clientInfo.device}#${clientInfo.device_id}`;
 }
 
 export function deconstructClientId(clientId: string): ClientIdConstituents {
   if (!clientId || clientId.split('#').length !== 4) {
     console.error(`Attempted to deconstruct invalid clientId: "${clientId}"`);
   }
-  const [app, os, device, device_id] = clientId.split('#');
+  let [app, os, device, device_id] = clientId.split('#');
+  app = unescape(app);
   return {
     app,
     os,

@@ -12,31 +12,29 @@ import {
   Element,
   ElementSearchResultSet,
   PluginClient,
-  FlexColumn,
-  FlexRow,
   FlipperPlugin,
   Toolbar,
   DetailSidebar,
-  VerticalRule,
   Button,
   GK,
   Idler,
-  Text,
-  styled,
-  colors,
-  SupportRequestFormV2,
-  constants,
   ReduxState,
   ArchivedDevice,
   ToolbarIcon,
+  Layout,
+  Sidebar,
 } from 'flipper';
 import Inspector from './Inspector';
 import InspectorSidebar from './InspectorSidebar';
 import Search from './Search';
 import ProxyArchiveClient from './ProxyArchiveClient';
 import React from 'react';
-import {VisualizerPortal} from 'flipper';
-import {getFlipperMediaCDN} from 'flipper';
+import {
+  VisualizerPortal,
+  getFlipperMediaCDN,
+  IDEFileResolver,
+  IDEType,
+} from 'flipper';
 
 type State = {
   init: boolean;
@@ -60,46 +58,27 @@ export type PersistedState = {
   elements: ElementMap;
   AXelements: ElementMap;
 };
-
-const FlipperADBarContainer = styled(FlexRow)({
-  backgroundColor: colors.warningTint,
-  flexGrow: 1,
-  justifyContent: 'center',
-  alignItems: 'center',
-  borderWidth: 2,
-});
-
-const FlipperADText = styled(Text)({
-  padding: 10,
-});
-
-const FlipperADButton = styled(Button)({
-  margin: 10,
-});
-
 type ClientGetNodesCalls = 'getNodes' | 'getAXNodes';
 type ClientMethodCalls = 'getRoot' | 'getAXRoot' | ClientGetNodesCalls;
 
-export default class Layout extends FlipperPlugin<State, any, PersistedState> {
-  FlipperADBar() {
-    return (
-      <FlipperADBarContainer>
-        <FlipperADText>
-          You can now submit support requests to Litho Group from Flipper. This
-          automatically attaches critical information for reproducing your issue
-          with just a single click.
-        </FlipperADText>
-        <FlipperADButton
-          type="primary"
-          onClick={() => {
-            this.props.setStaticView(SupportRequestFormV2);
-          }}>
-          Try it out
-        </FlipperADButton>
-      </FlipperADBarContainer>
-    );
-  }
+type ClassFileParams = {
+  fileName: string;
+  className: string;
+  dirRoot: string;
+};
 
+type OpenFileParams = {
+  resolvedPath: string;
+  ide: IDEType;
+  repo: string;
+  lineNumber: number;
+};
+
+export default class LayoutPlugin extends FlipperPlugin<
+  State,
+  any,
+  PersistedState
+> {
   static exportPersistedState = async (
     callClient: (method: ClientMethodCalls, params?: any) => Promise<any>,
     persistedState: PersistedState | undefined,
@@ -122,7 +101,7 @@ export default class Layout extends FlipperPlugin<State, any, PersistedState> {
 
     if (rootElement) {
       statusUpdate && statusUpdate('Fetching Child Nodes...');
-      await Layout.getAllNodes(
+      await LayoutPlugin.getAllNodes(
         rootElement,
         elements,
         callClient,
@@ -133,7 +112,7 @@ export default class Layout extends FlipperPlugin<State, any, PersistedState> {
     const AXelements: ElementMap = {};
     if (rootAXElement) {
       statusUpdate && statusUpdate('Fetching Child AX Nodes...');
-      await Layout.getAllNodes(
+      await LayoutPlugin.getAllNodes(
         rootAXElement,
         AXelements,
         callClient,
@@ -167,7 +146,7 @@ export default class Layout extends FlipperPlugin<State, any, PersistedState> {
         async ({elements}: {elements: Array<Element>}) => {
           await Promise.all(
             elements.map(async (elem) => {
-              await Layout.getAllNodes(
+              await LayoutPlugin.getAllNodes(
                 elem,
                 nodeMap,
                 callClient,
@@ -225,6 +204,8 @@ export default class Layout extends FlipperPlugin<State, any, PersistedState> {
     screenDimensions: null,
   };
 
+  private static isMylesInvoked = false;
+
   init() {
     if (!this.props.persistedState) {
       // If the selected plugin from the previous session was layout, then while importing the flipper export, the redux store doesn't get updated in the first render, due to which the plugin crashes, as it has no persisted state
@@ -243,8 +224,23 @@ export default class Layout extends FlipperPlugin<State, any, PersistedState> {
       }
     });
 
+    this.client.subscribe('resolvePath', (params: ClassFileParams) => {
+      this.resolvePath(params);
+    });
+
+    this.client.subscribe('openInIDE', (params: OpenFileParams) => {
+      this.openInIDE(params);
+    });
+
+    // since the first launch of Myles might produce a lag (Myles daemon needs to start)
+    // try to invoke Myles during the first launch of the Layout Plugin
+    if (!LayoutPlugin.isMylesInvoked) {
+      this.invokeMyles();
+      LayoutPlugin.isMylesInvoked = true;
+    }
+
     if (this.props.isArchivedDevice) {
-      this.getDevice()
+      Promise.resolve(this.device)
         .then((d) => {
           const handle = (d as ArchivedDevice).getArchivedScreenshotHandle();
           if (!handle) {
@@ -261,11 +257,41 @@ export default class Layout extends FlipperPlugin<State, any, PersistedState> {
 
     this.setState({
       init: true,
-      selectedElement: this.props.deepLinkPayload
-        ? this.props.deepLinkPayload
-        : null,
+      selectedElement:
+        typeof this.props.deepLinkPayload === 'string'
+          ? this.props.deepLinkPayload
+          : null,
     });
   }
+
+  resolvePath = async (params: ClassFileParams) => {
+    const paths = await IDEFileResolver.resolveFullPathsFromMyles(
+      params.fileName,
+      params.dirRoot,
+    );
+    const resolvedPath = IDEFileResolver.getBestPath(paths, params.className);
+    this.client.send('setResolvedPath', {
+      className: params.className,
+      resolvedPath: resolvedPath,
+    });
+  };
+
+  openInIDE = async (params: OpenFileParams) => {
+    let ide: IDEType = Number(IDEType[params.ide]);
+    if (Number.isNaN(ide)) {
+      ide = IDEType.AS; // default value
+    }
+    IDEFileResolver.openInIDE(
+      params.resolvedPath,
+      ide,
+      params.repo,
+      params.lineNumber,
+    );
+  };
+
+  invokeMyles = async () => {
+    await IDEFileResolver.resolveFullPathsFromMyles('.config', 'fbsource');
+  };
 
   onToggleTargetMode = () => {
     const inTargetMode = !this.state.inTargetMode;
@@ -326,6 +352,11 @@ export default class Layout extends FlipperPlugin<State, any, PersistedState> {
     const id = this.state.inAXMode
       ? this.state.selectedAXElement
       : this.state.selectedElement;
+    this.props.logger.track('usage', 'layoutInspector:setData', {
+      category: path[0],
+      path: Array.from(path).splice(1).join(),
+      ...this.realClient.query,
+    });
     this.client.call('setData', {
       id,
       path,
@@ -333,7 +364,6 @@ export default class Layout extends FlipperPlugin<State, any, PersistedState> {
       ax: this.state.inAXMode,
     });
   };
-  showFlipperADBar: boolean = false;
 
   getScreenDimensions(): {width: number; height: number} | null {
     if (this.state.screenDimensions) {
@@ -383,7 +413,6 @@ export default class Layout extends FlipperPlugin<State, any, PersistedState> {
       selectedAXElement: this.state.selectedAXElement,
       setPersistedState: this.props.setPersistedState,
       persistedState: this.props.persistedState,
-      onDataValueChanged: this.onDataValueChanged,
       searchResults: this.state.searchResults,
     };
 
@@ -394,9 +423,7 @@ export default class Layout extends FlipperPlugin<State, any, PersistedState> {
     } else if (selectedElement) {
       element = this.props.persistedState.elements[selectedElement];
     }
-    if (!constants.IS_PUBLIC_BUILD && !this.showFlipperADBar) {
-      this.showFlipperADBar = element != null && element.decoration === 'litho';
-    }
+
     const inspector = (
       <Inspector
         {...inspectorProps}
@@ -405,115 +432,118 @@ export default class Layout extends FlipperPlugin<State, any, PersistedState> {
       />
     );
 
-    const axInspector = this.state.inAXMode && (
-      <Inspector
-        {...inspectorProps}
-        onSelect={(selectedAXElement) => this.setState({selectedAXElement})}
-        showsSidebar={true}
-        ax
-      />
-    );
-
-    const divider = this.state.inAXMode && <VerticalRule />;
+    const axInspector = this.state.inAXMode ? (
+      <Sidebar width={400} backgroundColor="white" position="right">
+        <Inspector
+          {...inspectorProps}
+          onSelect={(selectedAXElement) => this.setState({selectedAXElement})}
+          showsSidebar={true}
+          ax
+        />
+      </Sidebar>
+    ) : null;
 
     const showAnalyzeYogaPerformanceButton = GK.get('flipper_yogaperformance');
 
     const screenDimensions = this.getScreenDimensions();
 
+    if (!this.state.init) {
+      return null;
+    }
     return (
-      <FlexColumn grow={true}>
-        {this.state.init && (
-          <>
-            <Toolbar>
-              {!this.props.isArchivedDevice && (
-                <ToolbarIcon
-                  onClick={this.onToggleTargetMode}
-                  title="Toggle target mode"
-                  icon="target"
-                  active={this.state.inTargetMode}
-                />
-              )}
-              {this.realClient.query.os === 'Android' && (
-                <ToolbarIcon
-                  onClick={this.onToggleAXMode}
-                  title="Toggle to see the accessibility hierarchy"
-                  icon="accessibility"
-                  active={this.state.inAXMode}
-                />
-              )}
-              {!this.props.isArchivedDevice && (
-                <ToolbarIcon
-                  onClick={this.onToggleAlignmentMode}
-                  title="Toggle AlignmentMode to show alignment lines"
-                  icon="borders"
-                  active={this.state.inAlignmentMode}
-                />
-              )}
-              {this.props.isArchivedDevice &&
-                this.state.visualizerScreenshot && (
-                  <ToolbarIcon
-                    onClick={this.onToggleVisualizer}
-                    title="Toggle visual recreation of layout"
-                    icon="mobile"
-                    active={!!this.state.visualizerWindow}
-                  />
-                )}
+      <>
+        <Layout.Top>
+          <Toolbar>
+            {!this.props.isArchivedDevice && (
+              <ToolbarIcon
+                onClick={this.onToggleTargetMode}
+                title="Toggle target mode"
+                icon="target"
+                active={this.state.inTargetMode}
+              />
+            )}
+            {this.realClient.query.os === 'Android' && (
+              <ToolbarIcon
+                onClick={this.onToggleAXMode}
+                title="Toggle to see the accessibility hierarchy"
+                icon="accessibility"
+                active={this.state.inAXMode}
+              />
+            )}
+            {!this.props.isArchivedDevice && (
+              <ToolbarIcon
+                onClick={this.onToggleAlignmentMode}
+                title="Toggle AlignmentMode to show alignment lines"
+                icon="borders"
+                active={this.state.inAlignmentMode}
+              />
+            )}
+            {this.props.isArchivedDevice && this.state.visualizerScreenshot && (
+              <ToolbarIcon
+                onClick={this.onToggleVisualizer}
+                title="Toggle visual recreation of layout"
+                icon="mobile"
+                active={!!this.state.visualizerWindow}
+              />
+            )}
 
-              <Search
-                client={this.getClient()}
-                setPersistedState={this.props.setPersistedState}
-                persistedState={this.props.persistedState}
-                onSearchResults={(searchResults) =>
-                  this.setState({searchResults})
-                }
-                inAXMode={this.state.inAXMode}
-                initialQuery={this.props.deepLinkPayload}
-              />
-            </Toolbar>
-            <FlexRow grow={true}>
-              {inspector}
-              {divider}
-              {axInspector}
-            </FlexRow>
-            {this.showFlipperADBar && this.FlipperADBar()}
-            <DetailSidebar>
-              <InspectorSidebar
-                client={this.getClient()}
-                realClient={this.realClient}
-                element={element}
-                onValueChanged={this.onDataValueChanged}
-                logger={this.props.logger}
-              />
-              {showAnalyzeYogaPerformanceButton &&
-              element &&
-              element.decoration === 'litho' ? (
-                <Button
-                  icon={'share-external'}
-                  compact={true}
-                  style={{marginTop: 8, marginRight: 12}}
-                  onClick={() => {
-                    this.props.selectPlugin('YogaPerformance', element!.id);
-                  }}>
-                  Analyze Yoga Performance
-                </Button>
-              ) : null}
-            </DetailSidebar>
-            {this.state.visualizerWindow &&
-              screenDimensions &&
-              (this.state.visualizerScreenshot ? (
-                <VisualizerPortal
-                  container={this.state.visualizerWindow.document.body}
-                  elements={this.props.persistedState.elements}
-                  highlightedElement={this.state.highlightedElement}
-                  screenshotURL={this.state.visualizerScreenshot}
-                  screenDimensions={screenDimensions}
-                />
-              ) : (
-                'Loading...'
-              ))}
-          </>
-        )}
-      </FlexColumn>
+            <Search
+              client={this.getClient()}
+              setPersistedState={this.props.setPersistedState}
+              persistedState={this.props.persistedState}
+              onSearchResults={(searchResults) =>
+                this.setState({searchResults})
+              }
+              inAXMode={this.state.inAXMode}
+              initialQuery={
+                typeof this.props.deepLinkPayload === 'string'
+                  ? this.props.deepLinkPayload
+                  : null
+              }
+            />
+          </Toolbar>
+          <Layout.Right>
+            {inspector}
+            {axInspector}
+          </Layout.Right>
+        </Layout.Top>
+
+        <DetailSidebar>
+          <InspectorSidebar
+            client={this.getClient()}
+            realClient={this.realClient}
+            element={element}
+            onValueChanged={this.onDataValueChanged}
+            logger={this.props.logger}
+          />
+          {showAnalyzeYogaPerformanceButton &&
+          element &&
+          element.decoration === 'litho' ? (
+            <Button
+              icon={'share-external'}
+              compact={true}
+              style={{marginTop: 8, marginRight: 12}}
+              onClick={() => {
+                this.props.selectPlugin('YogaPerformance', element!.id);
+              }}>
+              Analyze Yoga Performance
+            </Button>
+          ) : null}
+        </DetailSidebar>
+        {this.state.visualizerWindow &&
+          screenDimensions &&
+          (this.state.visualizerScreenshot ? (
+            <VisualizerPortal
+              container={this.state.visualizerWindow.document.body}
+              elements={this.props.persistedState.elements}
+              highlightedElement={this.state.highlightedElement}
+              screenshotURL={this.state.visualizerScreenshot}
+              screenDimensions={screenDimensions}
+            />
+          ) : (
+            'Loading...'
+          ))}
+      </>
     );
   }
 }

@@ -7,7 +7,8 @@
  * @format
  */
 
-import BaseDevice, {LogLevel} from './BaseDevice';
+import {LogLevel} from 'flipper-plugin';
+import BaseDevice from './BaseDevice';
 import ArchivedDevice from './ArchivedDevice';
 import {EventEmitter} from 'events';
 
@@ -204,7 +205,6 @@ export default class MetroDevice extends BaseDevice {
       deviceType: this.deviceType,
       title: this.title,
       os: this.os,
-      logEntries: [...this.logEntries],
       screenshotHandle: null,
     });
   }

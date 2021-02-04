@@ -13,6 +13,7 @@ import {
   addGatekeepedPlugins,
 } from '../plugins';
 import {FlipperPlugin, FlipperDevicePlugin, BaseAction} from '../../plugin';
+import {InstalledPluginDetails} from 'flipper-plugin-lib';
 
 const testPlugin = class extends FlipperPlugin<any, BaseAction, any> {
   static id = 'TestPlugin';
@@ -31,10 +32,13 @@ test('add clientPlugin', () => {
     {
       devicePlugins: new Map(),
       clientPlugins: new Map(),
+      loadedPlugins: new Map(),
+      bundledPlugins: new Map(),
       gatekeepedPlugins: [],
       failedPlugins: [],
       disabledPlugins: [],
       selectedPlugins: [],
+      marketplacePlugins: [],
     },
     registerPlugins([testPlugin]),
   );
@@ -46,10 +50,13 @@ test('add devicePlugin', () => {
     {
       devicePlugins: new Map(),
       clientPlugins: new Map(),
+      loadedPlugins: new Map(),
+      bundledPlugins: new Map(),
       gatekeepedPlugins: [],
       failedPlugins: [],
       disabledPlugins: [],
       selectedPlugins: [],
+      marketplacePlugins: [],
     },
     registerPlugins([testDevicePlugin]),
   );
@@ -61,10 +68,13 @@ test('do not add plugin twice', () => {
     {
       devicePlugins: new Map(),
       clientPlugins: new Map(),
+      loadedPlugins: new Map(),
+      bundledPlugins: new Map(),
       gatekeepedPlugins: [],
       failedPlugins: [],
       disabledPlugins: [],
       selectedPlugins: [],
+      marketplacePlugins: [],
     },
     registerPlugins([testPlugin, testPlugin]),
   );
@@ -72,15 +82,33 @@ test('do not add plugin twice', () => {
 });
 
 test('add gatekeeped plugin', () => {
-  const gatekeepedPlugins = [{name: 'plugin', out: 'out.js'}];
+  const gatekeepedPlugins: InstalledPluginDetails[] = [
+    {
+      name: 'plugin',
+      version: '1.0.0',
+      dir: '/plugins/test',
+      specVersion: 2,
+      pluginType: 'client',
+      source: 'src/index.ts',
+      isBundled: false,
+      isActivatable: true,
+      main: 'lib/index.js',
+      title: 'test',
+      id: 'test',
+      entry: '/plugins/test/lib/index.js',
+    },
+  ];
   const res = reducer(
     {
       devicePlugins: new Map(),
       clientPlugins: new Map(),
+      loadedPlugins: new Map(),
+      bundledPlugins: new Map(),
       gatekeepedPlugins: [],
       failedPlugins: [],
       disabledPlugins: [],
       selectedPlugins: [],
+      marketplacePlugins: [],
     },
     addGatekeepedPlugins(gatekeepedPlugins),
   );

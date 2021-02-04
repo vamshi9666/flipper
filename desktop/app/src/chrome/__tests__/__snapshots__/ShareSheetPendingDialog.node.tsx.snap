@@ -2,7 +2,7 @@
 
 exports[`ShareSheetPendingDialog is rendered with status update 1`] = `
 <div
-  className="css-ha9vz3"
+  className="css-1lvu114-View-FlexBox-FlexColumn"
   style={
     Object {
       "width": undefined,
@@ -10,49 +10,50 @@ exports[`ShareSheetPendingDialog is rendered with status update 1`] = `
   }
 >
   <div
-    className="css-mgujkx"
+    className="css-1tg2qwm-View-FlexBox-FlexColumn"
   >
     <div
-      className="css-1hed33k"
+      className="css-hs91vy-LoadingIndicator eq9prj20"
       size={30}
     />
     <span
-      className="css-1r5zvq8"
+      className="css-137ad86-Text"
       color="#6f6f6f"
     >
       Update
     </span>
   </div>
   <div
-    className="css-a1glw"
+    className="css-wospjg-View-FlexBox-FlexRow epz0qe20"
   >
     <div
-      className="css-12zzrdt"
+      className="css-t4wmtk-View-FlexBox-Spacer e13mj6h80"
     />
-    <div
-      className="css-1ee9nwd"
+    <button
+      className="ant-btn ant-btn-default"
       onClick={[Function]}
-      onMouseDown={[Function]}
-      onMouseUp={[Function]}
+      type="button"
     >
-      Cancel
-    </div>
-    <div
-      className="css-1ee9nwd"
+      <span>
+        Cancel
+      </span>
+    </button>
+    <button
+      className="ant-btn ant-btn-primary"
       onClick={[Function]}
-      onMouseDown={[Function]}
-      onMouseUp={[Function]}
-      type="primary"
+      type="button"
     >
-      Run In Background
-    </div>
+      <span>
+        Run In Background
+      </span>
+    </button>
   </div>
 </div>
 `;
 
 exports[`ShareSheetPendingDialog is rendered without status update 1`] = `
 <div
-  className="css-ha9vz3"
+  className="css-1lvu114-View-FlexBox-FlexColumn"
   style={
     Object {
       "width": undefined,
@@ -60,42 +61,43 @@ exports[`ShareSheetPendingDialog is rendered without status update 1`] = `
   }
 >
   <div
-    className="css-mgujkx"
+    className="css-1tg2qwm-View-FlexBox-FlexColumn"
   >
     <div
-      className="css-1hed33k"
+      className="css-hs91vy-LoadingIndicator eq9prj20"
       size={30}
     />
     <span
-      className="css-1r5zvq8"
+      className="css-137ad86-Text"
       color="#6f6f6f"
     >
       wubba lubba dub dub
     </span>
   </div>
   <div
-    className="css-a1glw"
+    className="css-wospjg-View-FlexBox-FlexRow epz0qe20"
   >
     <div
-      className="css-12zzrdt"
+      className="css-t4wmtk-View-FlexBox-Spacer e13mj6h80"
     />
-    <div
-      className="css-1ee9nwd"
+    <button
+      className="ant-btn ant-btn-default"
       onClick={[Function]}
-      onMouseDown={[Function]}
-      onMouseUp={[Function]}
+      type="button"
     >
-      Cancel
-    </div>
-    <div
-      className="css-1ee9nwd"
+      <span>
+        Cancel
+      </span>
+    </button>
+    <button
+      className="ant-btn ant-btn-primary"
       onClick={[Function]}
-      onMouseDown={[Function]}
-      onMouseUp={[Function]}
-      type="primary"
+      type="button"
     >
-      Run In Background
-    </div>
+      <span>
+        Run In Background
+      </span>
+    </button>
   </div>
 </div>
 `;

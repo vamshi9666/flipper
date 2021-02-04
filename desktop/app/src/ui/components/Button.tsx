@@ -7,16 +7,17 @@
  * @format
  */
 
-import React from 'react';
-import PropTypes from 'prop-types';
+import React, {useState, useCallback, useMemo} from 'react';
 import electron, {MenuItemConstructorOptions} from 'electron';
 import styled from '@emotion/styled';
+import {keyframes} from '@emotion/css';
+import {Button as AntdButton, Dropdown, Menu} from 'antd';
+
 import {colors} from './colors';
-import {connect} from 'react-redux';
-import {findDOMNode} from 'react-dom';
-import {keyframes} from 'emotion';
-import {State as Store} from '../../reducers/index';
 import Glyph, {IconSize} from './Glyph';
+import type {ButtonProps} from 'antd/lib/button';
+import {DownOutlined, CheckOutlined} from '@ant-design/icons';
+import {theme} from 'flipper-plugin';
 
 type ButtonType = 'primary' | 'success' | 'warning' | 'danger';
 
@@ -115,6 +116,7 @@ const StyledButton = styled.div<{
   disabled?: boolean;
   dropdown?: Array<MenuItemConstructorOptions>;
 }>((props) => ({
+  userSelect: 'none',
   backgroundColor:
     props.windowIsFocused && !props.disabled
       ? colors.white
@@ -189,7 +191,7 @@ const Icon = styled(Glyph)<{hasText: boolean}>(({hasText}) => ({
 }));
 Icon.displayName = 'Button:Icon';
 
-type OwnProps = {
+type Props = {
   /**
    * onMouseUp handler.
    */
@@ -213,7 +215,7 @@ type OwnProps = {
   /**
    * Type of button.
    */
-  type?: ButtonType;
+  type?: ButtonType; // TODO: normalize to Sandy
   /**
    * Children.
    */
@@ -254,139 +256,116 @@ type OwnProps = {
    * Whether the button should have additional padding left and right.
    */
   padded?: boolean;
-} & React.HTMLProps<HTMLDivElement>;
-
-type State = {
-  active: boolean;
-  wasClosed: boolean;
-};
-
-type StateFromProps = {windowIsFocused: boolean};
-type Props = OwnProps & StateFromProps;
+} & Omit<ButtonProps, 'type'>;
 
 /**
  * A simple button, used in many parts of the application.
  */
-class Button extends React.Component<Props, State> {
-  static contextTypes = {
-    inButtonGroup: PropTypes.bool,
-  };
-
-  state = {
-    active: false,
-    wasClosed: false,
-  };
-
-  _ref = React.createRef<React.Component<typeof StyledButton>>();
-
-  onMouseDown = (e: React.MouseEvent) => {
-    this.setState({active: true, wasClosed: false});
-    if (this.props.onMouseDown != null) {
-      this.props.onMouseDown(e);
-    }
-  };
-  onMouseUp = () => {
-    if (this.props.disabled === true) {
-      return;
-    }
-    if (this.props.dropdown && !this.state.wasClosed) {
-      const menu = electron.remote.Menu.buildFromTemplate(this.props.dropdown);
-      const position: {
-        x?: number;
-        y?: number;
-      } = {};
-      const {current} = this._ref;
-      if (current) {
-        const node = findDOMNode(current);
-        if (node instanceof Element) {
-          const {left, bottom} = node.getBoundingClientRect();
-          position.x = Math.floor(left);
-          position.y = Math.floor(bottom) + 6;
-        }
-      }
-      menu.popup({
-        window: electron.remote.getCurrentWindow(),
-        // @ts-ignore: async is private API in electron
-        async: true,
-        ...position,
-        callback: () => {
-          this.setState({wasClosed: true});
-        },
-      });
-    }
-    this.setState({active: false, wasClosed: false});
-  };
-
-  onClick = (e: React.MouseEvent) => {
-    if (this.props.disabled === true) {
-      return;
-    }
-    if (this.props.onClick) {
-      this.props.onClick(e);
-    }
-    if (this.props.href != null) {
-      electron.shell.openExternal(this.props.href);
-    }
-  };
-
-  render() {
-    const {
-      icon,
-      children,
-      selected,
-      iconSize,
-      windowIsFocused,
-      iconVariant,
-      ...props
-    } = this.props;
-    const {active} = this.state;
-
-    let color = colors.macOSTitleBarIcon;
-    if (props.disabled === true) {
-      color = colors.macOSTitleBarIconBlur;
-    } else if (windowIsFocused && selected === true) {
-      color = colors.macOSTitleBarIconSelected;
-    } else if (!windowIsFocused && (selected == null || selected === false)) {
-      color = colors.macOSTitleBarIconBlur;
-    } else if (!windowIsFocused && selected === true) {
-      color = colors.macOSTitleBarIconSelectedBlur;
-    } else if (selected == null && active) {
-      color = colors.macOSTitleBarIconActive;
-    } else if (props.type === 'danger') {
-      color = colors.red;
-    }
-
-    let iconComponent;
-    if (icon != null) {
-      iconComponent = (
-        <Icon
-          name={icon}
-          size={iconSize || (this.props.compact === true ? 12 : 16)}
-          color={color}
-          variant={iconVariant || 'filled'}
-          hasText={Boolean(children)}
-        />
-      );
-    }
-
-    return (
-      <StyledButton
-        {...props}
-        ref={this._ref as any}
-        windowIsFocused={windowIsFocused}
-        onClick={this.onClick}
-        onMouseDown={this.onMouseDown}
-        onMouseUp={this.onMouseUp}
-        inButtonGroup={this.context.inButtonGroup}>
-        {iconComponent}
-        {children}
-      </StyledButton>
-    );
-  }
+export default function Button(props: Props) {
+  return <SandyButton {...props} />;
 }
 
-export default connect<StateFromProps, {}, OwnProps, Store>(
-  ({application: {windowIsFocused}}) => ({
-    windowIsFocused,
-  }),
-)(Button);
+/**
+ * A simple button, used in many parts of the application.
+ */
+function SandyButton({
+  compact,
+  disabled,
+  icon,
+  children,
+  iconSize,
+  iconVariant,
+  dropdown,
+  type,
+  onClick,
+  href,
+  ...restProps
+}: Props) {
+  const [dropdownVisible, setDropdownVible] = useState(false);
+
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (disabled === true) {
+        return;
+      }
+      onClick?.(e);
+      if (href != null) {
+        electron.shell.openExternal(href); // TODO: decouple from Electron
+      }
+    },
+    [disabled, onClick, href],
+  );
+  const handleVisibleChange = useCallback((flag: boolean) => {
+    setDropdownVible(flag);
+  }, []);
+  let iconComponent;
+  if (icon != null) {
+    iconComponent = (
+      <Icon
+        name={icon}
+        size={iconSize || (compact === true ? 12 : 16)}
+        color={theme.textColorPrimary}
+        variant={iconVariant || 'filled'}
+        hasText={Boolean(children)}
+      />
+    );
+  }
+
+  const dropdownItems = useMemo(
+    () =>
+      dropdown && (
+        <Menu>
+          {dropdown!.map((item, idx) => (
+            <Menu.Item
+              onClick={(e) => {
+                // @ts-ignore this event args are bound to electron, remove in the future
+                item.click(item);
+                if (item.checked !== undefined) {
+                  // keep the menu item for check lists
+                  e.domEvent.stopPropagation();
+                  e.domEvent.preventDefault();
+                }
+              }}
+              disabled={item.enabled === false}
+              icon={
+                item.checked !== undefined && (
+                  <CheckOutlined
+                    style={{visibility: item.checked ? 'visible' : 'hidden'}}
+                  />
+                )
+              }
+              key={idx}>
+              {item.label}
+            </Menu.Item>
+          ))}
+        </Menu>
+      ),
+    [dropdown],
+  );
+
+  const button = (
+    <AntdButton
+      /* Probably more properties need passing on, but lets be explicit about it */
+      style={restProps.style}
+      disabled={disabled}
+      type={type === 'primary' ? 'primary' : 'default'}
+      danger={type === 'danger'}
+      onClick={handleClick}
+      icon={iconComponent}>
+      {children}
+      {dropdown ? <DownOutlined /> : null}
+    </AntdButton>
+  );
+  if (dropdown) {
+    return (
+      <Dropdown
+        overlay={dropdownItems!}
+        visible={dropdownVisible}
+        onVisibleChange={handleVisibleChange}>
+        {button}
+      </Dropdown>
+    );
+  } else {
+    return button;
+  }
+}

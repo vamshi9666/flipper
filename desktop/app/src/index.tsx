@@ -8,19 +8,20 @@
  */
 
 export {default as styled} from '@emotion/styled';
-export {keyframes} from 'emotion';
+export {keyframes} from '@emotion/css';
 export {produce} from 'immer';
 
 export * from './ui/index';
 export {getStringFromErrorLike, textContent, sleep} from './utils/index';
 export {serialize, deserialize} from './utils/serialization';
 export * from './utils/jsonTypes';
-export {default as GK} from './fb-stubs/GK';
+export {default as GK, loadGKs, loadDistilleryGK} from './fb-stubs/GK';
 export {default as createPaste} from './fb-stubs/createPaste';
 export {
   internGraphGETAPIRequest,
   internGraphPOSTAPIRequest,
   graphQLQuery,
+  isLoggedIn,
 } from './fb-stubs/user';
 export {
   FlipperBasePlugin,
@@ -32,24 +33,21 @@ export {
 } from './plugin';
 export {PluginClient, Props} from './plugin';
 export {default as Client} from './Client';
-export {MetricType} from './utils/exportMetrics';
-export {clipboard} from 'electron';
+export {reportUsage} from './utils/metrics';
+export {default as promiseTimeout} from './utils/promiseTimeout';
+export {clipboard, remote, OpenDialogOptions} from 'electron';
 export {default as SupportRequestFormV2} from './fb-stubs/SupportRequestFormV2';
 export {default as constants} from './fb-stubs/constants';
 export {connect} from 'react-redux';
 export {selectPlugin, StaticView} from './reducers/connections';
 export {writeBufferToFile, bufferToBlob} from './utils/screenshot';
 export {getPluginKey, getPersistedState} from './utils/pluginUtils';
-export {Idler} from './utils/Idler';
+export {Idler} from 'flipper-plugin';
 export {Store, MiddlewareAPI, State as ReduxState} from './reducers/index';
 export {default as BaseDevice} from './devices/BaseDevice';
-export {default as SidebarExtensions} from './fb-stubs/LayoutInspectorSidebarExtensions';
-export {
-  DeviceLogListener,
-  DeviceLogEntry,
-  LogLevel,
-} from './devices/BaseDevice';
+export {DeviceLogEntry, LogLevel, DeviceLogListener} from 'flipper-plugin';
 export {shouldParseAndroidLog} from './utils/crashReporterUtility';
+export {deconstructClientId} from './utils/clientUtils';
 export {default as isProduction} from './utils/isProduction';
 export {createTablePlugin} from './createTablePlugin';
 export {default as DetailSidebar} from './chrome/DetailSidebar';
@@ -90,7 +88,11 @@ export {
   default as ManagedTable_immutable,
   ManagedTableProps_immutable,
 } from './ui/components/table/ManagedTable_immutable';
-export {Value, renderValue} from './ui/components/table/TypeBasedValueRenderer';
+export {
+  Value,
+  renderValue,
+  valueToNullableString,
+} from './ui/components/table/TypeBasedValueRenderer';
 export {
   DataValueExtractor,
   DataInspectorExpanded,
@@ -99,6 +101,7 @@ export {default as DataInspector} from './ui/components/data-inspector/DataInspe
 export {default as ManagedDataInspector} from './ui/components/data-inspector/ManagedDataInspector';
 export {default as SearchableDataInspector} from './ui/components/data-inspector/SearchableDataInspector';
 export {default as DataDescription} from './ui/components/data-inspector/DataDescription';
+export {HighlightManager} from './ui/components/Highlight';
 export {default as Tabs} from './ui/components/Tabs';
 export {default as Tab} from './ui/components/Tab';
 export {default as Input} from './ui/components/Input';
@@ -115,7 +118,10 @@ export {default as Orderable} from './ui/components/Orderable';
 export {default as VirtualList} from './ui/components/VirtualList';
 export {Component, PureComponent} from 'react';
 export {default as ContextMenuProvider} from './ui/components/ContextMenuProvider';
-export {default as ContextMenu} from './ui/components/ContextMenu';
+export {
+  default as ContextMenu,
+  MenuTemplate,
+} from './ui/components/ContextMenu';
 export {FileListFile, FileListFiles} from './ui/components/FileList';
 export {default as FileList} from './ui/components/FileList';
 export {default as File} from './ui/components/File';
@@ -161,23 +167,41 @@ export {
   SearchableProps,
   default as Searchable,
 } from './ui/components/searchable/Searchable';
-export {default as SearchableTable} from './ui/components/searchable/SearchableTable';
+export {
+  default as SearchableTable,
+  filterRowsFactory,
+} from './ui/components/searchable/SearchableTable';
 export {default as SearchableTable_immutable} from './ui/components/searchable/SearchableTable_immutable';
 export {
   ElementID,
   ElementData,
+  ElementFramework,
   ElementAttribute,
   Element,
   ElementSearchResultSet,
   ElementsInspectorProps,
 } from './ui/components/elements-inspector/ElementsInspector';
-export {Elements} from './ui/components/elements-inspector/elements';
+export {
+  Elements,
+  ElementsConstants,
+} from './ui/components/elements-inspector/elements';
 export {ContextMenuExtension} from './ui/components/elements-inspector/elements';
 export {default as ElementsInspector} from './ui/components/elements-inspector/ElementsInspector';
 export {InspectorSidebar} from './ui/components/elements-inspector/sidebar';
 export {Console} from './ui/components/console';
 export {default as Sheet} from './ui/components/Sheet';
+export {default as FileSelector} from './ui/components/FileSelector';
 export {KeyboardActions} from './MenuBar';
-export {getFlipperMediaCDN} from './fb-stubs/user';
+export {getFlipperMediaCDN, appendAccessTokenToUrl} from './fb-stubs/user';
 export {Rect} from './utils/geometry';
 export {Logger} from './fb-interfaces/Logger';
+export {getInstance as getLogger} from './fb-stubs/Logger';
+export {callVSCode, getVSCodeUrl} from './utils/vscodeUtils';
+export {useLocalStorage} from './utils/useLocalStorage';
+export {checkIdbIsInstalled} from './utils/iOSContainerUtility';
+// Sidebar extensions should be last so they can import anything from here.
+export {default as SidebarExtensions} from './fb-stubs/LayoutInspectorSidebarExtensions';
+export {IDEFileResolver, IDEType} from './fb-stubs/IDEFileResolver';
+export {renderMockFlipperWithPlugin} from './test-utils/createMockFlipperWithPlugin';
+export {Tracked} from 'flipper-plugin'; // To be able to use it in legacy plugins
+export {RequireLogin} from './ui/components/RequireLogin';

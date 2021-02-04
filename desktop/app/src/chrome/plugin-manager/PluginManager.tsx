@@ -8,23 +8,23 @@
  */
 
 import React, {useState} from 'react';
-import {FlexColumn, Button, styled, Tab, Tabs, TabsContainer} from 'flipper';
+import {FlexColumn, Button, styled, Tab, Tabs, TabsContainer} from '../../ui';
 import PluginDebugger from './PluginDebugger';
 import PluginInstaller from './PluginInstaller';
 
 const Container = styled(FlexColumn)({
   padding: 15,
-  width: 700,
+  width: 760,
 });
 
 const Row = styled(FlexColumn)({
   alignItems: 'flex-end',
 });
 
-type Tabs = 'Plugin Status' | 'Install Plugins';
+type TabsState = 'Plugin Status' | 'Install Plugins';
 
 export default function (props: {onHide: () => any}) {
-  const [tab, setTab] = useState<Tabs>('Plugin Status');
+  const [tab, setTab] = useState<TabsState>('Plugin Status');
   return (
     <Container>
       <TabsContainer>

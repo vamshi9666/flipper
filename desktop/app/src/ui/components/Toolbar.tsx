@@ -7,39 +7,34 @@
  * @format
  */
 
-import {colors} from './colors';
-import FlexRow from './FlexRow';
+import React from 'react';
 import FlexBox from './FlexBox';
 import styled from '@emotion/styled';
+import {theme, Layout} from 'flipper-plugin';
 
-/**
- * A toolbar.
- */
-const Toolbar = styled(FlexRow)<{
-  position?: 'bottom' | 'top';
-  compact?: boolean;
-}>((props) => ({
-  backgroundColor: colors.light02,
-  borderBottom:
-    props.position === 'bottom'
-      ? 'none'
-      : `1px solid ${colors.sectionHeaderBorder}`,
-  borderTop:
-    props.position === 'bottom'
-      ? `1px solid ${colors.sectionHeaderBorder}`
-      : 'none',
-  flexShrink: 0,
-  height: props.compact ? 28 : 42,
-  lineHeight: '32px',
-  alignItems: 'center',
-  padding: 6,
-  width: '100%',
-}));
-Toolbar.displayName = 'Toolbar';
+const SandyToolbarContainer = styled(Layout.Horizontal)({
+  flexWrap: 'wrap',
+  padding: theme.space.small,
+  boxShadow: `inset 0px -1px 0px ${theme.dividerColor}`,
+});
 
 export const Spacer = styled(FlexBox)({
   flexGrow: 1,
 });
 Spacer.displayName = 'Spacer';
 
-export default Toolbar;
+export default function Toolbar({
+  children,
+  style,
+}: {
+  children?: React.ReactNode;
+  position?: 'bottom' | 'top';
+  compact?: boolean;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <SandyToolbarContainer style={style} gap={theme.space.small} center>
+      {children}
+    </SandyToolbarContainer>
+  );
+}

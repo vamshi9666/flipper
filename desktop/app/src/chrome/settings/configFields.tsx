@@ -8,18 +8,28 @@
  */
 
 import electron from 'electron';
-import {FlexColumn, styled, Text, FlexRow, Input, colors, Glyph} from 'flipper';
+import {
+  FlexColumn,
+  styled,
+  Text,
+  FlexRow,
+  Input,
+  colors,
+  Glyph,
+} from '../../ui';
 import React, {useState} from 'react';
 import {promises as fs} from 'fs';
 import {remote} from 'electron';
 import path from 'path';
 
-const ConfigFieldContainer = styled(FlexRow)({
+export const ConfigFieldContainer = styled(FlexRow)({
   paddingLeft: 10,
   paddingRight: 10,
+  marginBottom: 5,
+  paddingTop: 5,
 });
 
-const InfoText = styled(Text)({
+export const InfoText = styled(Text)({
   lineHeight: 1.35,
   paddingTop: 5,
 });
@@ -55,11 +65,13 @@ export function FilePathConfigField(props: {
   defaultValue: string;
   onChange: (path: string) => void;
   frozen?: boolean;
+  // Defaults to allowing directories only, this changes to expect regular files.
+  isRegularFile?: boolean;
 }) {
   const [value, setValue] = useState(props.defaultValue);
   const [isValid, setIsValid] = useState(true);
   fs.stat(value)
-    .then((stat) => stat.isDirectory())
+    .then((stat) => props.isRegularFile !== stat.isDirectory())
     .then((valid) => {
       if (valid !== isValid) {
         setIsValid(valid);

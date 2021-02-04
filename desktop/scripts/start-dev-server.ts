@@ -7,6 +7,7 @@
  * @format
  */
 
+const dotenv = require('dotenv').config();
 const electronBinary: string = require('electron') as any;
 import codeFrame from '@babel/code-frame';
 import socketIo from 'socket.io';
@@ -18,17 +19,77 @@ import chalk from 'chalk';
 import http from 'http';
 import path from 'path';
 import fs from 'fs-extra';
+import {hostname} from 'os';
 import {compileMain, generatePluginEntryPoints} from './build-utils';
-import Watchman from '../static/watchman';
+import Watchman from './watchman';
 import Metro from 'metro';
 import MetroResolver from 'metro-resolver';
 import {staticDir, appDir, babelTransformationsDir} from './paths';
 import isFB from './isFB';
 import getAppWatchFolders from './get-app-watch-folders';
-import getPlugins from '../static/getPlugins';
-import getPluginFolders from '../static/getPluginFolders';
-import startWatchPlugins from '../static/startWatchPlugins';
-import ensurePluginFoldersWatchable from '../static/ensurePluginFoldersWatchable';
+import {getPluginSourceFolders} from 'flipper-plugin-lib';
+import ensurePluginFoldersWatchable from './ensurePluginFoldersWatchable';
+import startWatchPlugins from './startWatchPlugins';
+import yargs from 'yargs';
+
+const argv = yargs
+  .usage('yarn start [args]')
+  .options({
+    'embedded-plugins': {
+      describe:
+        'Enables embedding of plugins into Flipper bundle. If it disabled then only installed plugins are loaded. The flag is enabled by default. Env var FLIPPER_NO_EMBEDDED_PLUGINS is equivalent to the command-line option "--no-embedded-plugins".',
+      type: 'boolean',
+    },
+    'fast-refresh': {
+      describe:
+        'Enable Fast Refresh - quick reload of UI component changes without restarting Flipper. The flag is disabled by default. Env var FLIPPER_FAST_REFRESH is equivalent to the command-line option "--fast-refresh".',
+      type: 'boolean',
+    },
+    'plugin-auto-update': {
+      describe:
+        '[FB-internal only] Enable plugin auto-updates. The flag is disabled by default in dev mode. Env var FLIPPER_NO_PLUGIN_AUTO_UPDATE is equivalent to the command-line option "--no-plugin-auto-update"',
+      type: 'boolean',
+    },
+    'plugin-auto-update-interval': {
+      describe:
+        '[FB-internal only] Set custom interval in milliseconds for plugin auto-update checks. Env var FLIPPER_PLUGIN_AUTO_UPDATE_POLLING_INTERVAL is equivalent to this command-line option.',
+      type: 'number',
+    },
+    'enabled-plugins': {
+      describe:
+        'Load only specified plugins and skip loading rest. This is useful when you are developing only one or few plugins. Plugins to load can be specified as a comma-separated list with either plugin id or name used as identifier, e.g. "--enabled-plugins network,inspector". The flag is not provided by default which means that all plugins loaded.',
+      type: 'array',
+    },
+    'open-dev-tools': {
+      describe:
+        'Open Dev Tools window on startup. The flag is disabled by default. Env var FLIPPER_OPEN_DEV_TOOLS is equivalent to the command-line option "--open-dev-tools".',
+      type: 'boolean',
+    },
+    'dev-server-port': {
+      describe:
+        'Dev server port. 3000 by default. Env var "PORT=3001" is equivalent to the command-line option "--dev-server-port 3001".',
+      default: 3000,
+      type: 'number',
+    },
+    'enable-all-gks': {
+      describe:
+        '[FB-internal only] Will yield `true` on any GK. Disabled by default. Setting env var FLIPPER_ENABLE_ALL_GKS is equivalent',
+      type: 'boolean',
+    },
+    channel: {
+      describe:
+        '[FB-internal only] Release channel. "stable" by default. Setting env var "FLIPPER_RELEASE_CHANNEL" is equivalent.',
+      choices: ['stable', 'insiders'],
+    },
+    'public-build': {
+      describe:
+        '[FB-internal only] Will force using public sources only, to be able to iterate quickly on the public version. If sources are checked out from GitHub this is already the default. Setting env var "FLIPPER_FORCE_PUBLIC_BUILD" is equivalent.',
+      type: 'boolean',
+    },
+  })
+  .version('DEV')
+  .help()
+  .parse(process.argv.slice(1));
 
 const ansiToHtmlConverter = new AnsiToHtmlConverter();
 
@@ -36,14 +97,71 @@ const DEFAULT_PORT = (process.env.PORT || 3000) as number;
 
 let shutdownElectron: (() => void) | undefined = undefined;
 
-if (isFB && process.env.FLIPPER_FB === undefined) {
+if (isFB) {
   process.env.FLIPPER_FB = 'true';
 }
-if (process.argv.includes('--no-embedded-plugins')) {
+
+if (argv['embedded-plugins'] === true) {
+  delete process.env.FLIPPER_NO_EMBEDDED_PLUGINS;
+} else if (argv['embedded-plugins'] === false) {
   process.env.FLIPPER_NO_EMBEDDED_PLUGINS = 'true';
 }
-if (process.argv.includes('--fast-refresh')) {
+
+if (argv['fast-refresh'] === true) {
   process.env.FLIPPER_FAST_REFRESH = 'true';
+} else if (argv['fast-refresh'] === false) {
+  delete process.env.FLIPPER_FAST_REFRESH;
+}
+
+if (argv['public-build'] === true) {
+  // we use a separate env var for forced_public builds, since
+  // FB_FLIPPER / isFB reflects whether we are running on FB sources / infra
+  // so changing that will not give the desired result (e.g. incorrect resolve paths, yarn installs)
+  // this variable purely overrides whether imports are from `fb` or `fb-stubs`
+  console.log('🐬 Emulating open source build of Flipper');
+  process.env.FLIPPER_FORCE_PUBLIC_BUILD = 'true';
+} else if (argv['public-build'] === false) {
+  delete process.env.FLIPPER_FORCE_PUBLIC_BUILD;
+}
+
+// By default plugin auto-update is disabled in dev mode,
+// but it is possible to enable it using this command line
+// argument or env var.
+if (
+  argv['plugin-auto-update'] === true ||
+  process.env.FLIPPER_PLUGIN_AUTO_UPDATE
+) {
+  delete process.env.FLIPPER_DISABLE_PLUGIN_AUTO_UPDATE;
+} else {
+  process.env.FLIPPER_DISABLE_PLUGIN_AUTO_UPDATE = 'true';
+}
+
+if (argv['plugin-auto-update-interval']) {
+  process.env.FLIPPER_PLUGIN_AUTO_UPDATE_POLLING_INTERVAL = `${argv['plugin-auto-update-interval']}`;
+}
+
+// Force participating in all GKs. Mostly intersting for Flipper team members.
+if (argv['enable-all-gks'] === true) {
+  process.env.FLIPPER_ENABLE_ALL_GKS = 'true';
+}
+
+if (argv['enabled-plugins'] !== undefined) {
+  process.env.FLIPPER_ENABLED_PLUGINS = argv['enabled-plugins'].join(',');
+}
+
+if (argv.channel !== undefined) {
+  process.env.FLIPPER_RELEASE_CHANNEL = argv.channel;
+}
+
+function looksLikeDevServer(): boolean {
+  const hn = hostname();
+  if (/^devvm.*\.facebook\.com$/.test(hn)) {
+    return true;
+  }
+  if (hn.endsWith('.od.fbinfra.net')) {
+    return true;
+  }
+  return false;
 }
 
 function launchElectron(port: number) {
@@ -88,7 +206,7 @@ function launchElectron(port: number) {
 
 async function startMetroServer(app: Express, server: http.Server) {
   const watchFolders = (await getAppWatchFolders()).concat(
-    await getPluginFolders(),
+    await getPluginSourceFolders(),
   );
   const baseConfig = await Metro.loadConfig();
   const config = Object.assign({}, baseConfig, {
@@ -115,6 +233,7 @@ async function startMetroServer(app: Express, server: http.Server) {
       sourceExts: ['js', 'jsx', 'ts', 'tsx', 'json', 'mjs', 'cjs'],
     },
     watch: true,
+    cacheVersion: process.env.FLIPPER_FORCE_PUBLIC_BUILD,
   });
   const connectMiddleware = await Metro.createConnectMiddleware(config);
   app.use(connectMiddleware.middleware);
@@ -126,7 +245,7 @@ function startAssetServer(
 ): Promise<{app: Express; server: http.Server}> {
   const app = express();
 
-  app.use((req, res, next) => {
+  app.use((req, _res, next) => {
     if (knownErrors[req.url] != null) {
       delete knownErrors[req.url];
       outputScreen();
@@ -134,14 +253,14 @@ function startAssetServer(
     next();
   });
 
-  app.use((req, res, next) => {
+  app.use((_req, res, next) => {
     res.header('Cache-Control', 'private, no-cache, no-store, must-revalidate');
     res.header('Expires', '-1');
     res.header('Pragma', 'no-cache');
     next();
   });
 
-  app.post('/_restartElectron', (req, res) => {
+  app.post('/_restartElectron', (_req, res) => {
     if (shutdownElectron) {
       shutdownElectron();
     }
@@ -149,8 +268,8 @@ function startAssetServer(
     res.end();
   });
 
-  app.get('/', (req, res) => {
-    fs.readFile(path.join(staticDir, 'index.dev.html'), (err, content) => {
+  app.get('/', (_req, res) => {
+    fs.readFile(path.join(staticDir, 'index.dev.html'), (_err, content) => {
       res.end(content);
     });
   });
@@ -171,10 +290,10 @@ function startAssetServer(
 }
 
 async function addWebsocket(server: http.Server) {
-  const io = socketIo(server);
+  const io = require('socket.io')(server); // 3.1.0 socket.io doesn't have type definitions
 
   // notify connected clients that there's errors in the console
-  io.on('connection', (client) => {
+  io.on('connection', (client: any) => {
     if (hasErrors()) {
       client.emit('hasErrors', ansiToHtmlConverter.toHtml(buildErrorScreen()));
     }
@@ -194,7 +313,7 @@ async function startWatchChanges(io: socketIo.Server) {
     const watchman = new Watchman(path.resolve(__dirname, '..'));
     await watchman.initialize();
     await Promise.all(
-      ['app', 'pkg', 'doctor'].map((dir) =>
+      ['app', 'pkg', 'doctor', 'plugin-lib', 'flipper-plugin'].map((dir) =>
         watchman.startWatchFiles(
           dir,
           () => {
@@ -206,8 +325,7 @@ async function startWatchChanges(io: socketIo.Server) {
         ),
       ),
     );
-    const plugins = await getPlugins();
-    await startWatchPlugins(plugins, () => {
+    await startWatchPlugins(() => {
       io.emit('refresh');
     });
   } catch (err) {
@@ -268,8 +386,19 @@ function outputScreen(socket?: socketIo.Server) {
   }
 }
 
+function checkDevServer() {
+  if (looksLikeDevServer()) {
+    console.log(
+      chalk.red(
+        `✖ It looks like you're trying to start Flipper on your OnDemand or DevServer, which is not supported. Please run this in a local checkout on your laptop or desktop instead.`,
+      ),
+    );
+  }
+}
+
 (async () => {
-  await generatePluginEntryPoints();
+  checkDevServer();
+  await generatePluginEntryPoints(argv.channel === 'insiders');
   await ensurePluginFoldersWatchable();
   const port = await detect(DEFAULT_PORT);
   const {app, server} = await startAssetServer(port);
@@ -277,5 +406,8 @@ function outputScreen(socket?: socketIo.Server) {
   await startMetroServer(app, server);
   outputScreen(socket);
   await compileMain();
+  if (dotenv && dotenv.parsed) {
+    console.log('✅  Loaded env vars from .env file: ', dotenv.parsed);
+  }
   shutdownElectron = launchElectron(port);
 })();

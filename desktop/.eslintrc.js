@@ -9,31 +9,24 @@
 
 const fbjs = require('eslint-config-fbjs');
 
-// enforces copyright header and @format directive to be present in every file
+// enforces copy-right header and @format directive to be present in every file
 const pattern = /^\*\r?\n[\S\s]*Facebook[\S\s]* \* @format\r?\n/;
 
 const builtInModules = [
+  'fb-qpl-xplat',
   'flipper',
+  'flipper-plugin',
+  'flipper-plugin-lib',
   'react',
   'react-dom',
   'electron',
   'adbkit',
+  'antd',
   'immer',
   '@emotion/styled',
 ];
 
-const prettierConfig = {
-  // arrowParens=always is the default for Prettier 2.0, but other configs
-  // at Facebook appear to be leaking into this file, which is still on
-  // Prettier 1.x at the moment, so it is best to be explicit.
-  arrowParens: 'always',
-  requirePragma: true,
-  singleQuote: true,
-  trailingComma: 'all',
-  bracketSpacing: false,
-  jsxBracketSameLine: true,
-  parser: 'flow',
-};
+const prettierConfig = require('./.prettierrc.json');
 
 module.exports = {
   parser: 'babel-eslint',
@@ -46,10 +39,16 @@ module.exports = {
     '@typescript-eslint',
     'import',
     'node',
+    'react-hooks',
+    'flipper',
   ],
   rules: {
     // disable rules from eslint-config-fbjs
+    'flowtype/define-flow-type': 0,
+    'flowtype/use-flow-type': 0,
     'react/react-in-jsx-scope': 0, // not needed with our metro implementation
+    'react-hooks/rules-of-hooks': 'error',
+    'react-hooks/exhaustive-deps': 'warn',
     'no-new': 0, // new keyword needed e.g. new Notification
     'no-catch-shadow': 0, // only relevant for IE8 and below
     'no-bitwise': 0, // bitwise operations needed in some places
@@ -71,15 +70,17 @@ module.exports = {
     // additional rules for this project
     'header/header': [2, 'block', {pattern}],
     'prettier/prettier': [2, prettierConfig],
-    'flowtype/object-type-delimiter': [0],
     'import/no-unresolved': [2, {commonjs: true, amd: true}],
     'node/no-extraneous-import': [2, {allowModules: builtInModules}],
     'node/no-extraneous-require': [2, {allowModules: builtInModules}],
+    'flipper/no-relative-imports-across-packages': [2],
   },
   settings: {
     'import/resolver': {
       typescript: {
+        alwaysTryTypes: true,
         extensions: ['.js', '.jsx', '.ts', '.tsx'],
+        project: '.',
       },
     },
   },
@@ -89,6 +90,15 @@ module.exports = {
       parser: '@typescript-eslint/parser',
       rules: {
         'prettier/prettier': [2, {...prettierConfig, parser: 'typescript'}],
+        // following rules are disabled because TS already handles it
+        'no-undef': 0,
+        'import/no-unresolved': 0,
+        // following rules are disabled because they don't handle TS correctly,
+        // while their @typescript-eslint counterpart does
+        // for reference: https://github.com/typescript-eslint/typescript-eslint/blob/master/packages/eslint-plugin/README.md#extension-rules
+        'no-unused-vars': 0,
+        'no-redeclare': 0,
+        '@typescript-eslint/no-redeclare': 1,
         '@typescript-eslint/no-unused-vars': [
           1,
           {

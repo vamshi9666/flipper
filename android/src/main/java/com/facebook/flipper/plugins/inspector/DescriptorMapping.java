@@ -13,7 +13,9 @@ import android.graphics.drawable.Drawable;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.widget.ImageView;
 import android.widget.TextView;
+import androidx.annotation.Nullable;
 import com.facebook.flipper.core.FlipperConnection;
 import com.facebook.flipper.plugins.inspector.descriptors.ActivityDescriptor;
 import com.facebook.flipper.plugins.inspector.descriptors.ApplicationDescriptor;
@@ -21,6 +23,7 @@ import com.facebook.flipper.plugins.inspector.descriptors.DialogDescriptor;
 import com.facebook.flipper.plugins.inspector.descriptors.DialogFragmentDescriptor;
 import com.facebook.flipper.plugins.inspector.descriptors.DrawableDescriptor;
 import com.facebook.flipper.plugins.inspector.descriptors.FragmentDescriptor;
+import com.facebook.flipper.plugins.inspector.descriptors.ImageViewDescriptor;
 import com.facebook.flipper.plugins.inspector.descriptors.ObjectDescriptor;
 import com.facebook.flipper.plugins.inspector.descriptors.SupportDialogFragmentDescriptor;
 import com.facebook.flipper.plugins.inspector.descriptors.SupportFragmentDescriptor;
@@ -51,6 +54,7 @@ public class DescriptorMapping {
     mapping.register(ViewGroup.class, new ViewGroupDescriptor());
     mapping.register(View.class, new ViewDescriptor());
     mapping.register(TextView.class, new TextViewDescriptor());
+    mapping.register(ImageView.class, new ImageViewDescriptor());
     mapping.register(Drawable.class, new DrawableDescriptor());
     mapping.register(Dialog.class, new DialogDescriptor());
     mapping.register(android.app.Fragment.class, new FragmentDescriptor());
@@ -66,7 +70,7 @@ public class DescriptorMapping {
     mMapping.put(clazz, descriptor);
   }
 
-  public NodeDescriptor<?> descriptorForClass(Class<?> clazz) {
+  public @Nullable NodeDescriptor<?> descriptorForClass(Class<?> clazz) {
     while (!mMapping.containsKey(clazz)) {
       clazz = clazz.getSuperclass();
     }

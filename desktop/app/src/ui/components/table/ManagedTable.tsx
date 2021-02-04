@@ -137,6 +137,12 @@ export type ManagedTableProps = {
    * Whether to allow navigation via arrow keys. Default: true
    */
   enableKeyboardNavigation?: boolean;
+  /**
+   * Reference to the managed table.
+   */
+  innerRef?:
+    | React.MutableRefObject<ManagedTable | undefined>
+    | ((ref: ManagedTable | undefined) => void);
 };
 
 type ManagedTableState = {
@@ -208,11 +214,19 @@ export class ManagedTable extends React.Component<
   }
 
   componentDidMount() {
-    document.addEventListener('keydown', this.onKeyDown);
+    if (typeof this.props.innerRef === 'function') {
+      this.props.innerRef(this);
+    } else if (this.props.innerRef) {
+      this.props.innerRef.current = this;
+    }
   }
 
   componentWillUnmount() {
-    document.removeEventListener('keydown', this.onKeyDown);
+    if (typeof this.props.innerRef === 'function') {
+      this.props.innerRef(undefined);
+    } else if (this.props.innerRef) {
+      this.props.innerRef.current = undefined;
+    }
   }
 
   UNSAFE_componentWillReceiveProps(nextProps: ManagedTableProps) {
@@ -259,6 +273,7 @@ export class ManagedTable extends React.Component<
     prevState: ManagedTableState,
   ) {
     if (
+      this.props.stickyBottom !== false &&
       this.props.rows.length !== prevProps.rows.length &&
       this.state.shouldScrollToBottom &&
       this.state.highlightedRows.size < 2
@@ -312,7 +327,7 @@ export class ManagedTable extends React.Component<
     );
   };
 
-  onKeyDown = (e: KeyboardEvent) => {
+  onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const {highlightedRows} = this.state;
     if (highlightedRows.size === 0) {
       return;
@@ -322,12 +337,14 @@ export class ManagedTable extends React.Component<
         (e.ctrlKey && process.platform !== 'darwin')) &&
       e.keyCode === 67
     ) {
+      e.stopPropagation();
       this.onCopy(false);
     } else if (
       (e.keyCode === 38 || e.keyCode === 40) &&
       this.props.highlightableRows &&
       this.props.enableKeyboardNavigation
     ) {
+      e.stopPropagation();
       // arrow navigation
       const {rows} = this.props;
       const {highlightedRows} = this.state;
@@ -402,6 +419,10 @@ export class ManagedTable extends React.Component<
   }
 
   onHighlight = (e: React.MouseEvent, row: TableBodyRow, index: number) => {
+    if (!this.props.highlightableRows) {
+      return;
+    }
+
     if (e.shiftKey) {
       // prevents text selection
       e.preventDefault();
@@ -571,9 +592,10 @@ export class ManagedTable extends React.Component<
     }
     return this.props.rows
       .filter((row) => highlightedRows.has(row.key))
-      .map(
-        (row: TableBodyRow) =>
-          row.copyText || this.getTextContentOfRow(row.key).join('\t'),
+      .map((row: TableBodyRow) =>
+        typeof row.copyText === 'function'
+          ? row.copyText()
+          : row.copyText || this.getTextContentOfRow(row.key).join('\t'),
       )
       .join('\n');
   };
@@ -673,7 +695,10 @@ export class ManagedTable extends React.Component<
     }
 
     return (
-      <Container canOverflow={horizontallyScrollable}>
+      <Container
+        canOverflow={horizontallyScrollable}
+        onKeyDown={this.onKeyDown}
+        tabIndex={0}>
         {hideHeader !== true && (
           <TableHead
             columnOrder={columnOrder}

@@ -8,27 +8,17 @@
  */
 
 import stream from 'stream';
-import {FlipperDevicePlugin} from 'flipper';
-import {sortPluginsByName} from '../utils/pluginUtils';
-
-export type LogLevel =
-  | 'unknown'
-  | 'verbose'
-  | 'debug'
-  | 'info'
-  | 'warn'
-  | 'error'
-  | 'fatal';
-
-export type DeviceLogEntry = {
-  readonly date: Date;
-  readonly pid: number;
-  readonly tid: number;
-  readonly app?: string;
-  readonly type: LogLevel;
-  readonly tag: string;
-  readonly message: string;
-};
+import {
+  DeviceLogEntry,
+  _SandyDevicePluginInstance,
+  _SandyPluginDefinition,
+  DeviceType,
+  DeviceLogListener,
+  Idler,
+} from 'flipper-plugin';
+import type {DevicePluginDefinition, DevicePluginMap} from '../plugin';
+import {getFlipperLibImplementation} from '../utils/flipperLibImplementation';
+import {DeviceSpec, OS as PluginOS} from 'flipper-plugin-lib';
 
 export type DeviceShell = {
   stdout: stream.Readable;
@@ -36,30 +26,29 @@ export type DeviceShell = {
   stdin: stream.Writable;
 };
 
-export type DeviceLogListener = (entry: DeviceLogEntry) => void;
-
-export type DeviceType =
-  | 'emulator'
-  | 'physical'
-  | 'archivedEmulator'
-  | 'archivedPhysical';
+export type OS = PluginOS | 'Windows' | 'MacOS' | 'JSWebApp';
 
 export type DeviceExport = {
   os: OS;
   title: string;
   deviceType: DeviceType;
   serial: string;
-  logs: Array<DeviceLogEntry>;
+  pluginStates: Record<string, any>;
 };
 
-export type OS = 'iOS' | 'Android' | 'Windows' | 'MacOS' | 'JSWebApp' | 'Metro';
-
 export default class BaseDevice {
-  constructor(serial: string, deviceType: DeviceType, title: string, os: OS) {
+  constructor(
+    serial: string,
+    deviceType: DeviceType,
+    title: string,
+    os: OS,
+    specs: DeviceSpec[] = [],
+  ) {
     this.serial = serial;
     this.title = title;
     this.deviceType = deviceType;
     this.os = os;
+    this.specs = specs;
   }
 
   // operating system of this device
@@ -74,17 +63,24 @@ export default class BaseDevice {
   // serial number for this device
   serial: string;
 
+  // additional device specs used for plugin compatibility checks
+  specs: DeviceSpec[];
+
   // possible src of icon to display next to the device title
   icon: string | null | undefined;
 
   logListeners: Map<Symbol, DeviceLogListener> = new Map();
-  logEntries: Array<DeviceLogEntry> = [];
   isArchived: boolean = false;
   // if imported, stores the original source location
   source = '';
 
   // sorted list of supported device plugins
-  devicePlugins!: string[];
+  devicePlugins: string[] = [];
+
+  sandyPluginStates: Map<string, _SandyDevicePluginInstance> = new Map<
+    string,
+    _SandyDevicePluginInstance
+  >();
 
   supportsOS(os: OS) {
     return os.toLowerCase() === this.os.toLowerCase();
@@ -94,20 +90,37 @@ export default class BaseDevice {
     return this.title;
   }
 
-  toJSON(): DeviceExport {
+  async exportState(
+    idler: Idler,
+    onStatusMessage: (msg: string) => void,
+  ): Promise<Record<string, any>> {
+    const pluginStates: Record<string, any> = {};
+
+    for (const instance of this.sandyPluginStates.values()) {
+      if (instance.isPersistable()) {
+        pluginStates[instance.definition.id] = await instance.exportState(
+          idler,
+          onStatusMessage,
+        );
+      }
+    }
+
+    return pluginStates;
+  }
+
+  toJSON() {
     return {
       os: this.os,
       title: this.title,
       deviceType: this.deviceType,
       serial: this.serial,
-      logs: this.getLogs(),
     };
   }
 
-  teardown() {}
-
-  supportedColumns(): Array<string> {
-    return ['date', 'pid', 'tid', 'tag', 'message', 'type', 'time'];
+  teardown() {
+    for (const instance of this.sandyPluginStates.values()) {
+      instance.destroy();
+    }
   }
 
   addLogListener(callback: DeviceLogListener): Symbol {
@@ -130,22 +143,7 @@ export default class BaseDevice {
   }
 
   addLogEntry(entry: DeviceLogEntry) {
-    this.logEntries.push(entry);
     this._notifyLogListeners(entry);
-  }
-
-  getLogs(startDate: Date | null = null) {
-    return startDate != null
-      ? this.logEntries.filter((log) => {
-          return log.date > startDate;
-        })
-      : this.logEntries;
-  }
-
-  clearLogs(): Promise<void> {
-    // Only for device types that allow clearing.
-    this.logEntries = [];
-    return Promise.resolve();
   }
 
   removeLogListener(id: Symbol) {
@@ -178,10 +176,46 @@ export default class BaseDevice {
     return null;
   }
 
-  loadDevicePlugins(devicePlugins?: Map<string, typeof FlipperDevicePlugin>) {
-    this.devicePlugins = Array.from(devicePlugins ? devicePlugins.values() : [])
-      .filter((plugin) => plugin.supportsDevice(this))
-      .sort(sortPluginsByName)
-      .map((plugin) => plugin.id);
+  loadDevicePlugins(
+    devicePlugins?: DevicePluginMap,
+    pluginStates?: Record<string, any>,
+  ) {
+    if (!devicePlugins) {
+      return;
+    }
+    const plugins = Array.from(devicePlugins.values());
+    for (const plugin of plugins) {
+      this.loadDevicePlugin(plugin, pluginStates?.[plugin.id]);
+    }
+  }
+
+  loadDevicePlugin(plugin: DevicePluginDefinition, initialState?: any) {
+    if (plugin instanceof _SandyPluginDefinition) {
+      if (plugin.asDevicePluginModule().supportsDevice(this as any)) {
+        this.devicePlugins.push(plugin.id);
+        this.sandyPluginStates.set(
+          plugin.id,
+          new _SandyDevicePluginInstance(
+            getFlipperLibImplementation(),
+            plugin,
+            this,
+            initialState,
+          ),
+        );
+      }
+    } else {
+      if (plugin.supportsDevice(this)) {
+        this.devicePlugins.push(plugin.id);
+      }
+    }
+  }
+
+  unloadDevicePlugin(pluginId: string) {
+    const instance = this.sandyPluginStates.get(pluginId);
+    if (instance) {
+      instance.destroy();
+      this.sandyPluginStates.delete(pluginId);
+    }
+    this.devicePlugins.splice(this.devicePlugins.indexOf(pluginId), 1);
   }
 }

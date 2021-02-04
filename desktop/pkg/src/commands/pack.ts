@@ -15,7 +15,8 @@ import * as inquirer from 'inquirer';
 import * as path from 'path';
 import * as yarn from '../utils/yarn';
 import cli from 'cli-ux';
-import {runBuild, getPluginDetails} from 'flipper-pkg-lib';
+import {runBuild} from 'flipper-pkg-lib';
+import {getInstalledPluginDetails} from 'flipper-plugin-lib';
 
 async function deriveOutputFileName(inputDirectory: string): Promise<string> {
   const packageJson = await readJSON(path.join(inputDirectory, 'package.json'));
@@ -34,6 +35,11 @@ export default class Pack extends Command {
       default: '.',
       description:
         'Where to output the package, file or directory. Defaults to the current working directory.',
+    }),
+    production: flags.boolean({
+      description:
+        'Force env.NODE_ENV=production, enable minification and disable producing source maps.',
+      default: false,
     }),
   };
 
@@ -110,13 +116,13 @@ export default class Pack extends Command {
     cli.action.stop();
 
     cli.action.start('Reading plugin details');
-    const plugin = await getPluginDetails(inputDirectory);
+    const plugin = await getInstalledPluginDetails(inputDirectory);
     const out = path.resolve(inputDirectory, plugin.main);
     cli.action.stop(`done. Source: ${plugin.source}. Main: ${plugin.main}.`);
 
     cli.action.start(`Compiling`);
     await ensureDir(path.dirname(out));
-    await runBuild(inputDirectory, plugin.source, out);
+    await runBuild(inputDirectory, plugin.source, out, parsedFlags.production);
     cli.action.stop();
 
     cli.action.start(`Packing to ${outputFile}`);

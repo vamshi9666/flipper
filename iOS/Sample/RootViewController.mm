@@ -29,10 +29,11 @@
 - (instancetype)init {
   if (self = [super init]) {
     _rootCKHostingView = [[CKComponentHostingView alloc]
-        initWithComponentProvider:[self class]
-                sizeRangeProvider:[CKComponentFlexibleSizeRangeProvider
-                                      providerWithFlexibility:
-                                          CKComponentSizeRangeFlexibleHeight]];
+        initWithComponentProviderFunc:componentForModel
+                    sizeRangeProvider:
+                        [CKComponentFlexibleSizeRangeProvider
+                            providerWithFlexibility:
+                                CKComponentSizeRangeFlexibleHeight]];
 
     [self.view addSubview:_rootCKHostingView];
     [self loadViewIfNeeded];
@@ -51,40 +52,34 @@
   _rootCKHostingView.frame = self.view.bounds;
 }
 
-+ (CKComponent*)componentForModel:(id<NSObject>)model
-                          context:(id<NSObject>)context {
-  return [CKBackgroundLayoutComponent
-      newWithComponent:
-          [CKFlexboxComponent newWithView:{}
-              size:{}
-              style:{}
-              children:{
-                           {[CKButtonComponent
-                               newWithAction:nil
-                                     options:{
-                                                 .titles = @"Purple",
-                                                 .titleColors =
-                                                     UIColor.purpleColor,
-                                             }]},
-                           {[CKButtonComponent
-                               newWithAction:nil
-                                     options:{
-                                                 .titles = @"Brown",
-                                                 .titleColors =
-                                                     UIColor.brownColor,
-                                             }]},
-                           {[CKButtonComponent
-                               newWithAction:nil
-                                     options:{
-                                                 .titles = @"Cyan",
-                                                 .titleColors =
-                                                     UIColor.cyanColor,
-                                             }]},
-                       }]
-            background:[CKImageComponent
-                           newWithImage:[UIImage imageNamed:@"sonarpattern"]
-                             attributes:{}
-                                   size:{}]];
+static CKComponent* componentForModel(
+    id<NSObject> model,
+    id<NSObject> context) {
+  return CK::BackgroundLayoutComponentBuilder()
+      .component(CK::FlexboxComponentBuilder()
+                     .child(
+                         {.component = CK::ButtonComponentBuilder()
+                                           .action(nil)
+                                           .title(@"Purple")
+                                           .titleColor(UIColor.purpleColor)
+                                           .build()})
+                     .child(
+                         {.component = CK::ButtonComponentBuilder()
+                                           .action(nil)
+                                           .title(@"Brown")
+                                           .titleColor(UIColor.brownColor)
+                                           .build()})
+                     .child(
+                         {.component = CK::ButtonComponentBuilder()
+                                           .action(nil)
+                                           .title(@"Cyan")
+                                           .titleColor(UIColor.cyanColor)
+                                           .build()})
+                     .build())
+      .background(CK::ImageComponentBuilder()
+                      .image([UIImage imageNamed:@"sonarpattern"])
+                      .build())
+      .build();
 }
 
 @end

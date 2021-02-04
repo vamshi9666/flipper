@@ -1,10 +1,15 @@
 {
-  "name": "Sandbox",
+  "$schema": "https://fbflipper.com/schemas/plugin-package/v2.json",
+  "name": "flipper-plugin-sandbox",
+  "id": "Sandbox",
   "title": "Sandbox",
-  "version": "1.0.0",
-  "main": "index.tsx",
+  "version": "0.0.0",
+  "main": "dist/bundle.js",
+  "flipperBundlerEntry": "index.tsx",
   "license": "MIT",
-  "keywords": ["flipper-plugin"],
+  "keywords": [
+    "flipper-plugin"
+  ],
   "icon": "translate",
   "bugs": {
     "email": "edoardo@fb.com"

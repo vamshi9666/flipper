@@ -1,12 +1,21 @@
 {
+  "$schema": "https://fbflipper.com/schemas/plugin-package/v2.json",
   "name": "flipper-plugin-navigation",
-  "version": "0.0.1",
-  "main": "index.tsx",
+  "id": "Navigation",
+  "version": "0.0.0",
+  "main": "dist/bundle.js",
+  "flipperBundlerEntry": "index.tsx",
   "license": "MIT",
-  "keywords": ["flipper-plugin"],
+  "keywords": [
+    "flipper-plugin"
+  ],
   "title": "Navigation",
   "icon": "directions",
   "bugs": {
     "email": "beneloca@fb.com"
+  },
+  "peerDependencies": {
+    "flipper-plugin": "0.0.0",
+    "antd": "*"
   }
 }

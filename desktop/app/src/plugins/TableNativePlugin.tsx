@@ -33,7 +33,8 @@ import textContent from '../utils/textContent';
 import createPaste from '../fb-stubs/createPaste';
 import {ReactNode} from 'react';
 import React from 'react';
-import {KeyboardActions} from 'app/src/MenuBar';
+import {KeyboardActions} from '../MenuBar';
+import {BundledPluginDetails} from 'flipper-plugin-lib';
 
 type ID = string;
 
@@ -95,7 +96,6 @@ const NonWrappingText = styled(Text)({
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
-  userSelect: 'none',
 });
 
 const BooleanValue = styled(NonWrappingText)<{active?: boolean}>((props) => ({
@@ -173,7 +173,7 @@ function buildRow(
   return {
     columns,
     key: rowData.id,
-    copyText: JSON.stringify(rowData),
+    copyText: () => JSON.stringify(rowData),
     filterValue: rowData.id,
   };
 }
@@ -255,6 +255,21 @@ export default function createTableNativePlugin(id: string, title: string) {
     static keyboardActions: KeyboardActions = ['clear', 'createPaste'];
     static id = id || '';
     static title = title || '';
+
+    static details: BundledPluginDetails = {
+      id,
+      title,
+      icon: 'apps',
+      name: id,
+      pluginType: 'client',
+      // all hmm...
+      specVersion: 1,
+      version: 'auto',
+      source: '',
+      main: '',
+      isBundled: true,
+      isActivatable: true,
+    };
 
     static defaultPersistedState: PersistedState = {
       rows: [],

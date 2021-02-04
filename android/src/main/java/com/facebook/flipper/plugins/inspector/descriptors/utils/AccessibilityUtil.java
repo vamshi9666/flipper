@@ -37,8 +37,8 @@ public final class AccessibilityUtil {
 
   private AccessibilityUtil() {}
 
-  public static final EnumMapping sAccessibilityActionMapping =
-      new EnumMapping("UNKNOWN") {
+  public static final EnumMapping<Integer> sAccessibilityActionMapping =
+      new EnumMapping<Integer>("UNKNOWN") {
         {
           put("FOCUS", AccessibilityNodeInfoCompat.ACTION_FOCUS);
           put("CLEAR_FOCUS", AccessibilityNodeInfoCompat.ACTION_CLEAR_FOCUS);
@@ -72,8 +72,8 @@ public final class AccessibilityUtil {
         }
       };
 
-  public static final EnumMapping sImportantForAccessibilityMapping =
-      new EnumMapping("AUTO") {
+  public static final EnumMapping<Integer> sImportantForAccessibilityMapping =
+      new EnumMapping<Integer>("AUTO") {
         {
           put("AUTO", View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
           put("NO", View.IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -578,7 +578,7 @@ public final class AccessibilityUtil {
           actionsArrayBuilder.put(actionLabel);
         } else {
           actionsArrayBuilder.put(
-              AccessibilityUtil.sAccessibilityActionMapping.get(action.getId(), false));
+              AccessibilityUtil.sAccessibilityActionMapping.toPicker(action.getId(), false));
         }
       }
       nodeInfoProps.put("actions", actionsArrayBuilder.build());
@@ -693,7 +693,7 @@ public final class AccessibilityUtil {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
       props.put(
           "important-for-accessibility",
-          AccessibilityUtil.sImportantForAccessibilityMapping.get(
+          AccessibilityUtil.sImportantForAccessibilityMapping.toPicker(
               view.getImportantForAccessibility()));
     }
 

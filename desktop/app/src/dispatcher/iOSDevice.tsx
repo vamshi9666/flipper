@@ -11,16 +11,17 @@ import {ChildProcess} from 'child_process';
 import {Store} from '../reducers/index';
 import {setXcodeDetected} from '../reducers/application';
 import {Logger} from '../fb-interfaces/Logger';
-import {DeviceType} from '../devices/BaseDevice';
+import type {DeviceType} from 'flipper-plugin';
 import {promisify} from 'util';
 import path from 'path';
 import child_process from 'child_process';
 const execFile = child_process.execFile;
-import iosUtil from '../fb-stubs/iOSContainerUtility';
+import iosUtil from '../utils/iOSContainerUtility';
 import IOSDevice from '../devices/IOSDevice';
-import isProduction from '../utils/isProduction';
-import GK from '../fb-stubs/GK';
 import {registerDeviceCallbackOnPlugins} from '../utils/onRegisterDevice';
+import {addErrorNotification} from '../reducers/notifications';
+import {getStaticPath} from '../utils/pathUtils';
+
 type iOSSimulatorDevice = {
   state: 'Booted' | 'Shutdown' | 'Shutting Down';
   availability?: string;
@@ -29,7 +30,17 @@ type iOSSimulatorDevice = {
   udid: string;
 };
 
-type IOSDeviceParams = {udid: string; type: DeviceType; name: string};
+export type IOSDeviceParams = {
+  udid: string;
+  type: DeviceType;
+  name: string;
+  deviceTypeIdentifier?: string;
+  state?: string;
+};
+
+const exec = promisify(child_process.exec);
+
+let portForwarders: Array<ChildProcess> = [];
 
 function isAvailable(simulator: iOSSimulatorDevice): boolean {
   // For some users "availability" is set, for others it's "isAvailable"
@@ -42,23 +53,37 @@ function isAvailable(simulator: iOSSimulatorDevice): boolean {
   );
 }
 
-const portforwardingClient = isProduction()
-  ? path.resolve(
-      __dirname,
-      'PortForwardingMacApp.app/Contents/MacOS/PortForwardingMacApp',
-    )
-  : 'PortForwardingMacApp.app/Contents/MacOS/PortForwardingMacApp';
+const portforwardingClient = path.join(
+  getStaticPath(),
+  'PortForwardingMacApp.app/Contents/MacOS/PortForwardingMacApp',
+);
 
 function forwardPort(port: number, multiplexChannelPort: number) {
-  return execFile(portforwardingClient, [
-    `-portForward=${port}`,
-    `-multiplexChannelPort=${multiplexChannelPort}`,
-  ]);
+  const childProcess = execFile(
+    portforwardingClient,
+    [`-portForward=${port}`, `-multiplexChannelPort=${multiplexChannelPort}`],
+    (err, stdout, stderr) => {
+      console.error('Port forwarding app failed to start', err, stdout, stderr);
+    },
+  );
+  console.log('Port forwarding app started', childProcess);
+  childProcess.addListener('error', (err) =>
+    console.error('Port forwarding app error', err),
+  );
+  childProcess.addListener('exit', (code) =>
+    console.log(`Port forwarding app exited with code ${code}`),
+  );
+  return childProcess;
 }
-// start port forwarding server for real device connections
-const portForwarders: Array<ChildProcess> = GK.get('flipper_ios_device_support')
-  ? [forwardPort(8089, 8079), forwardPort(8088, 8078)]
-  : [];
+
+function startDevicePortForwarders(): void {
+  if (portForwarders.length > 0) {
+    // Only ever start them once.
+    return;
+  }
+  // start port forwarding server for real device connections
+  portForwarders = [forwardPort(8089, 8079), forwardPort(8088, 8078)];
+}
 
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', () => {
@@ -66,91 +91,123 @@ if (typeof window !== 'undefined') {
   });
 }
 
-async function queryDevices(store: Store, logger: Logger): Promise<void> {
-  if (!(await checkIfDevicesCanBeQueryied(store))) {
-    return;
-  }
-  await checkXcodeVersionMismatch(store);
+async function queryDevices(store: Store, logger: Logger): Promise<any> {
+  return Promise.all([
+    checkXcodeVersionMismatch(store),
+    getSimulators(true).then((devices) => {
+      processDevices(store, logger, devices, 'emulator');
+    }),
+    getActiveDevices(store.getState().settingsState.idbPath).then(
+      (devices: IOSDeviceParams[]) => {
+        processDevices(store, logger, devices, 'physical');
+      },
+    ),
+  ]);
+}
+
+function processDevices(
+  store: Store,
+  logger: Logger,
+  activeDevices: IOSDeviceParams[],
+  type: 'physical' | 'emulator',
+) {
   const {connections} = store.getState();
   const currentDeviceIDs: Set<string> = new Set(
     connections.devices
-      .filter((device) => device instanceof IOSDevice)
+      .filter(
+        (device) =>
+          device instanceof IOSDevice &&
+          device.deviceType === type &&
+          !device.isArchived,
+      )
       .map((device) => device.serial),
   );
-  return Promise.all([getActiveSimulators(), getActiveDevices()])
-    .then(([a, b]) => a.concat(b))
-    .then((activeDevices) => {
-      for (const {udid, type, name} of activeDevices) {
-        if (currentDeviceIDs.has(udid)) {
-          currentDeviceIDs.delete(udid);
-        } else {
-          logger.track('usage', 'register-device', {
-            os: 'iOS',
-            type: type,
-            name: name,
-            serial: udid,
-          });
-          const iOSDevice = new IOSDevice(udid, type, name);
-          iOSDevice.loadDevicePlugins(store.getState().plugins.devicePlugins);
-          store.dispatch({
-            type: 'REGISTER_DEVICE',
-            payload: iOSDevice,
-          });
-          registerDeviceCallbackOnPlugins(
-            store,
-            store.getState().plugins.devicePlugins,
-            store.getState().plugins.clientPlugins,
-            iOSDevice,
-          );
-        }
-      }
 
-      if (currentDeviceIDs.size > 0) {
-        currentDeviceIDs.forEach((id) =>
-          logger.track('usage', 'unregister-device', {os: 'iOS', serial: id}),
-        );
-        store.dispatch({
-          type: 'UNREGISTER_DEVICES',
-          payload: currentDeviceIDs,
-        });
-      }
+  for (const {udid, type, name} of activeDevices) {
+    if (currentDeviceIDs.has(udid)) {
+      currentDeviceIDs.delete(udid);
+    } else {
+      logger.track('usage', 'register-device', {
+        os: 'iOS',
+        type: type,
+        name: name,
+        serial: udid,
+      });
+      const iOSDevice = new IOSDevice(udid, type, name);
+      iOSDevice.loadDevicePlugins(store.getState().plugins.devicePlugins);
+      store.dispatch({
+        type: 'REGISTER_DEVICE',
+        payload: iOSDevice,
+      });
+      registerDeviceCallbackOnPlugins(
+        store,
+        store.getState().plugins.devicePlugins,
+        store.getState().plugins.clientPlugins,
+        iOSDevice,
+      );
+    }
+  }
+
+  if (currentDeviceIDs.size > 0) {
+    currentDeviceIDs.forEach((id) =>
+      logger.track('usage', 'unregister-device', {os: 'iOS', serial: id}),
+    );
+    store.dispatch({
+      type: 'UNREGISTER_DEVICES',
+      payload: currentDeviceIDs,
     });
+  }
 }
 
-function getActiveSimulators(): Promise<Array<IOSDeviceParams>> {
-  const deviceSetPath = process.env.DEVICE_SET_PATH
+function getDeviceSetPath() {
+  return process.env.DEVICE_SET_PATH
     ? ['--set', process.env.DEVICE_SET_PATH]
     : [];
+}
+
+export function getSimulators(
+  bootedOnly: boolean,
+): Promise<Array<IOSDeviceParams>> {
   return promisify(execFile)(
     'xcrun',
-    ['simctl', ...deviceSetPath, 'list', 'devices', '--json'],
+    ['simctl', ...getDeviceSetPath(), 'list', 'devices', '--json'],
     {
       encoding: 'utf8',
     },
   )
     .then(({stdout}) => JSON.parse(stdout).devices)
     .then((simulatorDevices: Array<iOSSimulatorDevice>) => {
-      const simulators: Array<iOSSimulatorDevice> = Object.values(
-        simulatorDevices,
-      ).reduce((acc: Array<iOSSimulatorDevice>, cv) => acc.concat(cv), []);
-
+      const simulators = Object.values(simulatorDevices).flat();
       return simulators
         .filter(
-          (simulator) => simulator.state === 'Booted' && isAvailable(simulator),
+          (simulator) =>
+            (!bootedOnly || simulator.state === 'Booted') &&
+            isAvailable(simulator),
         )
         .map((simulator) => {
           return {
-            udid: simulator.udid,
+            ...simulator,
             type: 'emulator',
-            name: simulator.name,
           } as IOSDeviceParams;
         });
     })
-    .catch((_) => []);
+    .catch((e) => {
+      console.error(e);
+      return Promise.resolve([]);
+    });
 }
 
-function getActiveDevices(): Promise<Array<IOSDeviceParams>> {
-  return iosUtil.targets().catch((e) => {
+export async function launchSimulator(udid: string): Promise<any> {
+  await promisify(execFile)(
+    'xcrun',
+    ['simctl', ...getDeviceSetPath(), 'boot', udid],
+    {encoding: 'utf8'},
+  );
+  await promisify(execFile)('open', ['-a', 'simulator']);
+}
+
+function getActiveDevices(idbPath: string): Promise<Array<IOSDeviceParams>> {
+  return iosUtil.targets(idbPath).catch((e) => {
     console.error(e.message);
     return [];
   });
@@ -173,7 +230,6 @@ async function checkXcodeVersionMismatch(store: Store) {
   if (xcodeVersionMismatchFound) {
     return;
   }
-  const exec = promisify(child_process.exec);
   try {
     let {stdout: xcodeCLIVersion} = await exec('xcode-select -p');
     xcodeCLIVersion = xcodeCLIVersion.trim();
@@ -184,18 +240,10 @@ async function checkXcodeVersionMismatch(store: Store) {
       );
       const runningVersion = match && match.length > 0 ? match[0].trim() : null;
       if (runningVersion && runningVersion !== xcodeCLIVersion) {
-        const errorMessage = `Xcode version mismatch: Simulator is running from "${runningVersion}" while Xcode CLI is "${xcodeCLIVersion}". Running "xcode-select --switch ${runningVersion}" can fix this.`;
-        store.dispatch({
-          type: 'SERVER_ERROR',
-          payload: {
-            message: errorMessage,
-            details:
-              "You might want to run 'sudo xcode-select -s /Applications/Xcode.app/Contents/Developer'",
-            urgent: true,
-          },
-        });
-        // Fire a console.error as well, so that it gets reported to the backend.
-        console.error(errorMessage);
+        const errorMessage = `Xcode version mismatch: Simulator is running from "${runningVersion}" while Xcode CLI is "${xcodeCLIVersion}". Running "xcode-select --switch ${runningVersion}" can fix this. For example: "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"`;
+        store.dispatch(
+          addErrorNotification('Xcode version mismatch', errorMessage),
+        );
         xcodeVersionMismatchFound = true;
         break;
       }
@@ -204,45 +252,18 @@ async function checkXcodeVersionMismatch(store: Store) {
     console.error(e);
   }
 }
-
-let canQueryDevices: boolean | undefined = undefined;
-
-async function checkIfDevicesCanBeQueryied(store: Store): Promise<boolean> {
-  if (canQueryDevices !== undefined) {
-    return canQueryDevices;
-  }
-  try {
-    const exec = promisify(child_process.exec);
-    // make sure we can use instruments (it will throw otherwise)
-    await exec('instruments -s devices');
-    return (canQueryDevices = true);
-  } catch (e) {
-    store.dispatch({
-      type: 'SERVER_ERROR',
-      payload: {
-        message:
-          'It looks like XCode was not installed properly. Further actions are required if you want to use an iOS emulator.',
-        details:
-          "You might want to run 'sudo xcode-select -s /Applications/Xcode.app/Contents/Developer'",
-        error: e,
-      },
-    });
-    return (canQueryDevices = false);
-  }
-}
-
 async function isXcodeDetected(): Promise<boolean> {
-  return promisify(child_process.exec)('xcode-select -p')
+  return exec('xcode-select -p')
     .then((_) => true)
     .catch((_) => false);
 }
 
-export async function getActiveDevicesAndSimulators(): Promise<
-  Array<IOSDevice>
-> {
+export async function getActiveDevicesAndSimulators(
+  store: Store,
+): Promise<Array<IOSDevice>> {
   const activeDevices: Array<Array<IOSDeviceParams>> = await Promise.all([
-    getActiveSimulators(),
-    getActiveDevices(),
+    getSimulators(true),
+    getActiveDevices(store.getState().settingsState.idbPath),
   ]);
   const allDevices = activeDevices[0].concat(activeDevices[1]);
   return allDevices.map((device) => {
@@ -252,19 +273,16 @@ export async function getActiveDevicesAndSimulators(): Promise<
 }
 
 export default (store: Store, logger: Logger) => {
-  // monitoring iOS devices only available on MacOS.
-  if (process.platform !== 'darwin') {
-    return;
-  }
   if (!store.getState().settingsState.enableIOS) {
     return;
   }
-  isXcodeDetected()
-    .then((isDetected) => {
-      store.dispatch(setXcodeDetected(isDetected));
-      return isDetected;
-    })
-    .then((isDetected) =>
-      isDetected ? queryDevicesForever(store, logger) : Promise.resolve(),
-    );
+  isXcodeDetected().then((isDetected) => {
+    store.dispatch(setXcodeDetected(isDetected));
+    if (isDetected) {
+      if (store.getState().settingsState.enablePhysicalIOS) {
+        startDevicePortForwarders();
+      }
+      return queryDevicesForever(store, logger);
+    }
+  });
 };

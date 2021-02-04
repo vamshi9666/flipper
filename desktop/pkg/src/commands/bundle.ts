@@ -7,11 +7,12 @@
  * @format
  */
 
-import {Command} from '@oclif/command';
+import {Command, flags} from '@oclif/command';
 import {args} from '@oclif/parser';
 import fs from 'fs-extra';
 import path from 'path';
-import {runBuild, getPluginDetails} from 'flipper-pkg-lib';
+import {runBuild} from 'flipper-pkg-lib';
+import {getInstalledPluginDetails} from 'flipper-plugin-lib';
 
 export default class Bundle extends Command {
   public static description = 'transpiles and bundles plugin';
@@ -28,8 +29,21 @@ export default class Bundle extends Command {
     },
   ];
 
+  public static flags = {
+    watch: flags.boolean({
+      description:
+        'Watch for plugin source code and bundle it after every change.',
+      default: false,
+    }),
+    production: flags.boolean({
+      description:
+        'Force env.NODE_ENV=production, enable minification and disable producing source maps.',
+      default: false,
+    }),
+  };
+
   public async run() {
-    const {args} = this.parse(Bundle);
+    const {args, flags} = this.parse(Bundle);
     const inputDirectory: string = path.resolve(process.cwd(), args.directory);
     const stat = await fs.lstat(inputDirectory);
     if (!stat.isDirectory()) {
@@ -41,9 +55,67 @@ export default class Bundle extends Command {
         `package.json is not found in plugin source directory ${inputDirectory}.`,
       );
     }
-    const plugin = await getPluginDetails(inputDirectory);
+    const plugin = await getInstalledPluginDetails(inputDirectory);
     const out = path.resolve(inputDirectory, plugin.main);
     await fs.ensureDir(path.dirname(out));
-    await runBuild(inputDirectory, plugin.source, out);
+
+    const success = await runBuildOnce(
+      inputDirectory,
+      plugin.source,
+      out,
+      !flags.production,
+    );
+    if (!flags.watch) {
+      process.exit(success ? 0 : 1);
+    } else {
+      enterWatchMode(inputDirectory, plugin.source, out, !flags.production);
+    }
   }
+}
+
+async function runBuildOnce(
+  inputDirectory: string,
+  source: string,
+  out: string,
+  dev: boolean,
+) {
+  try {
+    await runBuild(inputDirectory, source, out, dev);
+    console.log('✅  Build succeeded');
+    return true;
+  } catch (e) {
+    console.error(e);
+    console.error('🥵  Build failed');
+    return false;
+  }
+}
+
+function enterWatchMode(
+  inputDirectory: string,
+  source: string,
+  out: string,
+  dev: boolean,
+) {
+  console.log(`⏳  Waiting for changes...`);
+  let isBuilding = false;
+  let pendingChanges = false;
+  fs.watch(
+    path.join(inputDirectory, 'src'),
+    {
+      recursive: true,
+    },
+    async () => {
+      pendingChanges = true;
+      if (isBuilding) {
+        return; // prevent kicking of a second build
+      }
+      isBuilding = true;
+      while (pendingChanges) {
+        pendingChanges = false;
+        await runBuildOnce(inputDirectory, source, out, dev);
+      }
+      isBuilding = false;
+      console.log(`⏳  Waiting for changes...`);
+    },
+  );
 }

@@ -10,140 +10,31 @@
 import {PersistedStateReducer, FlipperDevicePlugin} from '../plugin';
 import {State, MiddlewareAPI} from '../reducers/index';
 import {setPluginState} from '../reducers/pluginStates';
-import {flipperRecorderAddEvent} from './pluginStateRecorder';
+import {
+  flipperRecorderAddEvent,
+  isRecordingEvents,
+} from './pluginStateRecorder';
 import {
   clearMessageQueue,
-  queueMessage,
+  queueMessages,
   Message,
+  DEFAULT_MAX_QUEUE_SIZE,
 } from '../reducers/pluginMessageQueue';
-import {Idler, BaseIdler} from './Idler';
+import {IdlerImpl} from './Idler';
 import {pluginIsStarred, getSelectedPluginKey} from '../reducers/connections';
 import {deconstructPluginKey} from './clientUtils';
-import {onBytesReceived} from '../dispatcher/tracking';
 import {defaultEnabledBackgroundPlugins} from './pluginUtils';
+import {batch, Idler, _SandyPluginInstance} from 'flipper-plugin';
+import {addBackgroundStat} from './pluginStats';
 
-const MAX_BACKGROUND_TASK_TIME = 25;
-
-type StatEntry = {
-  cpuTimeTotal: number; // Total time spend in persisted Reducer
-  cpuTimeDelta: number; // Time spend since previous tracking tick
-  messageCountTotal: number; // amount of message received for this plugin
-  messageCountDelta: number; // amout of messages received since previous tracking tick
-  maxTime: number; // maximum time spend in a single reducer call
-  bytesReceivedTotal: number; // Bytes received
-  bytesReceivedDelta: number; // Bytes received since last tick
-};
-
-const pluginBackgroundStats = new Map<string, StatEntry>();
-
-export function resetPluginBackgroundStatsDelta() {
-  pluginBackgroundStats.forEach((stat) => {
-    stat.cpuTimeDelta = 0;
-    stat.messageCountDelta = 0;
-    stat.bytesReceivedDelta = 0;
-  });
-}
-
-onBytesReceived((plugin: string, bytes: number) => {
-  if (!pluginBackgroundStats.has(plugin)) {
-    pluginBackgroundStats.set(plugin, createEmptyStat());
-  }
-  const stat = pluginBackgroundStats.get(plugin)!;
-  stat.bytesReceivedTotal += bytes;
-  stat.bytesReceivedDelta += bytes;
-});
-
-export function getPluginBackgroundStats(): {
-  cpuTime: number; // amount of ms cpu used since the last stats (typically every minute)
-  bytesReceived: number;
-  byPlugin: {[plugin: string]: StatEntry};
-} {
-  let cpuTime: number = 0;
-  let bytesReceived: number = 0;
-  const byPlugin = Array.from(pluginBackgroundStats.entries()).reduce(
-    (aggregated, [pluginName, data]) => {
-      cpuTime += data.cpuTimeDelta;
-      bytesReceived += data.bytesReceivedDelta;
-      aggregated[pluginName] = data;
-      return aggregated;
-    },
-    {} as {[plugin: string]: StatEntry},
-  );
-  return {
-    cpuTime,
-    bytesReceived,
-    byPlugin,
-  };
-}
-
-if (window) {
-  // @ts-ignore
-  window.flipperPrintPluginBackgroundStats = () => {
-    console.table(
-      Array.from(pluginBackgroundStats.entries()).map(
-        ([
-          plugin,
-          {
-            cpuTimeDelta,
-            cpuTimeTotal,
-            messageCountDelta,
-            messageCountTotal,
-            maxTime,
-            bytesReceivedTotal,
-            bytesReceivedDelta,
-          },
-        ]) => ({
-          plugin,
-          cpuTimeTotal,
-          messageCountTotal,
-          cpuTimeDelta,
-          messageCountDelta,
-          maxTime,
-          bytesReceivedTotal,
-          bytesReceivedDelta,
-        }),
-      ),
-    );
-  };
-}
-
-function createEmptyStat(): StatEntry {
-  return {
-    cpuTimeDelta: 0,
-    cpuTimeTotal: 0,
-    messageCountDelta: 0,
-    messageCountTotal: 0,
-    maxTime: 0,
-    bytesReceivedTotal: 0,
-    bytesReceivedDelta: 0,
-  };
-}
-
-function addBackgroundStat(plugin: string, cpuTime: number) {
-  if (!pluginBackgroundStats.has(plugin)) {
-    pluginBackgroundStats.set(plugin, createEmptyStat());
-  }
-  const stat = pluginBackgroundStats.get(plugin)!;
-  stat.cpuTimeDelta += cpuTime;
-  stat.cpuTimeTotal += cpuTime;
-  stat.messageCountDelta += 1;
-  stat.messageCountTotal += 1;
-  stat.maxTime = Math.max(stat.maxTime, cpuTime);
-  if (cpuTime > MAX_BACKGROUND_TASK_TIME) {
-    console.warn(
-      `Plugin ${plugin} took too much time while doing background: ${cpuTime}ms. Handling background messages should take less than ${MAX_BACKGROUND_TASK_TIME}ms.`,
-    );
-  }
-}
-
-function processMessage(
+function processMessageClassic(
   state: State,
   pluginKey: string,
   plugin: {
     id: string;
     persistedStateReducer: PersistedStateReducer | null;
   },
-  message: {method: string; params?: any},
+  message: Message,
 ): State {
   const reducerStartTime = Date.now();
   flipperRecorderAddEvent(pluginKey, message.method, message.params);
@@ -161,88 +52,125 @@ function processMessage(
   }
 }
 
-export function processMessageImmediately(
-  store: MiddlewareAPI,
+function processMessagesSandy(
   pluginKey: string,
-  plugin: {
-    defaultPersistedState: any;
-    id: string;
-    persistedStateReducer: PersistedStateReducer | null;
-  },
-  message: {method: string; params?: any},
+  plugin: _SandyPluginInstance,
+  messages: Message[],
 ) {
-  const persistedState = getCurrentPluginState(store, plugin, pluginKey);
-  const newPluginState = processMessage(
-    persistedState,
-    pluginKey,
-    plugin,
-    message,
-  );
-  if (persistedState !== newPluginState) {
-    store.dispatch(
-      setPluginState({
-        pluginKey,
-        state: newPluginState,
-      }),
+  const reducerStartTime = Date.now();
+  if (isRecordingEvents(pluginKey)) {
+    messages.forEach((message) => {
+      flipperRecorderAddEvent(pluginKey, message.method, message.params);
+    });
+  }
+  try {
+    plugin.receiveMessages(messages);
+    addBackgroundStat(plugin.definition.id, Date.now() - reducerStartTime);
+  } catch (e) {
+    console.error(
+      `Failed to process event for plugin ${plugin.definition.id}`,
+      e,
     );
   }
 }
 
-export function processMessageLater(
+export function processMessagesImmediately(
   store: MiddlewareAPI,
   pluginKey: string,
-  plugin: {
-    defaultPersistedState: any;
-    id: string;
-    persistedStateReducer: PersistedStateReducer | null;
-    maxQueueSize?: number;
-  },
-  message: {method: string; params?: any},
+  plugin:
+    | {
+        defaultPersistedState: any;
+        id: string;
+        persistedStateReducer: PersistedStateReducer | null;
+      }
+    | _SandyPluginInstance,
+  messages: Message[],
 ) {
+  if (plugin instanceof _SandyPluginInstance) {
+    processMessagesSandy(pluginKey, plugin, messages);
+  } else {
+    const persistedState = getCurrentPluginState(store, plugin, pluginKey);
+    const newPluginState = messages.reduce(
+      (state, message) =>
+        processMessageClassic(state, pluginKey, plugin, message),
+      persistedState,
+    );
+    if (persistedState !== newPluginState) {
+      store.dispatch(
+        setPluginState({
+          pluginKey,
+          state: newPluginState,
+        }),
+      );
+    }
+  }
+}
+
+export function processMessagesLater(
+  store: MiddlewareAPI,
+  pluginKey: string,
+  plugin:
+    | {
+        defaultPersistedState: any;
+        id: string;
+        persistedStateReducer: PersistedStateReducer | null;
+        maxQueueSize?: number;
+      }
+    | _SandyPluginInstance,
+  messages: Message[],
+) {
+  const pluginId =
+    plugin instanceof _SandyPluginInstance ? plugin.definition.id : plugin.id;
   const isSelected =
     pluginKey === getSelectedPluginKey(store.getState().connections);
   switch (true) {
-    case plugin.id === 'Navigation': // Navigation events are always processed, to make sure the navbar stays up to date
+    // Navigation events are always processed immediately, to make sure the navbar stays up to date, see also T69991064
+    case pluginId === 'Navigation':
     case isSelected && getPendingMessages(store, pluginKey).length === 0:
-      processMessageImmediately(store, pluginKey, plugin, message);
+      processMessagesImmediately(store, pluginKey, plugin, messages);
       break;
     case isSelected:
+    case plugin instanceof _SandyPluginInstance:
     case plugin instanceof FlipperDevicePlugin:
+    case (plugin as any).prototype instanceof FlipperDevicePlugin:
     case pluginIsStarred(
       store.getState().connections.userStarredPlugins,
       deconstructPluginKey(pluginKey).client,
-      plugin.id,
+      pluginId,
     ):
       store.dispatch(
-        queueMessage(
+        queueMessages(
           pluginKey,
-          message.method,
-          message.params,
-          plugin.maxQueueSize,
+          messages,
+          plugin instanceof _SandyPluginInstance
+            ? DEFAULT_MAX_QUEUE_SIZE
+            : plugin.maxQueueSize,
         ),
       );
       break;
     default:
       // In all other cases, messages will be dropped...
-      if (!defaultEnabledBackgroundPlugins.includes(plugin.id))
-        console.error(
-          `Received message for disabled plugin ${plugin.id}, dropping..`,
+      if (!defaultEnabledBackgroundPlugins.includes(pluginId))
+        console.warn(
+          `Received message for disabled plugin ${pluginId}, dropping..`,
         );
   }
 }
 
 export async function processMessageQueue(
-  plugin: {
-    defaultPersistedState: any;
-    id: string;
-    persistedStateReducer: PersistedStateReducer | null;
-  },
+  plugin:
+    | {
+        defaultPersistedState: any;
+        id: string;
+        persistedStateReducer: PersistedStateReducer | null;
+      }
+    | _SandyPluginInstance,
   pluginKey: string,
   store: MiddlewareAPI,
   progressCallback?: (progress: {current: number; total: number}) => void,
-  idler: BaseIdler = new Idler(),
+  idler: Idler = new IdlerImpl(),
 ): Promise<boolean> {
-  if (!plugin.persistedStateReducer) {
+  if (!_SandyPluginInstance.is(plugin) && !plugin.persistedStateReducer) {
     return true;
   }
   const total = getPendingMessages(store, pluginKey).length;
@@ -253,37 +181,50 @@ export async function processMessageQueue(
       break;
     }
     // there are messages to process! lets do so until we have to idle
-    const persistedState = getCurrentPluginState(store, plugin, pluginKey);
+    // persistedState is irrelevant for SandyPlugins, as they store state locally
+    const persistedState = _SandyPluginInstance.is(plugin)
+      ? undefined
+      : getCurrentPluginState(store, plugin, pluginKey);
     let offset = 0;
     let newPluginState = persistedState;
-    do {
-      newPluginState = processMessage(
-        newPluginState,
-        pluginKey,
-        plugin,
-        messages[offset],
-      );
-      offset++;
-      progress++;
+    batch(() => {
+      do {
+        if (_SandyPluginInstance.is(plugin)) {
+          // Optimization: we could send a batch of messages here
+          processMessagesSandy(pluginKey, plugin, [messages[offset]]);
+        } else {
+          newPluginState = processMessageClassic(
+            newPluginState,
+            pluginKey,
+            plugin,
+            messages[offset],
+          );
+        }
+        offset++;
+        progress++;
 
-      progressCallback?.({
-        total: Math.max(total, progress),
-        current: progress,
-      });
-    } while (offset < messages.length && !idler.shouldIdle());
-    // save progress
-    // by writing progress away first and then idling, we make sure this logic is
-    // resistent to kicking off this process twice; grabbing, processing messages, saving state is done synchronosly
-    // until the idler has to break
-    store.dispatch(clearMessageQueue(pluginKey, offset));
-    if (newPluginState !== persistedState) {
-      store.dispatch(
-        setPluginState({
-          pluginKey,
-          state: newPluginState,
-        }),
-      );
-    }
+        progressCallback?.({
+          total: Math.max(total, progress),
+          current: progress,
+        });
+      } while (offset < messages.length && !idler.shouldIdle());
+      // save progress
+      // by writing progress away first and then idling, we make sure this logic is
+      // resistent to kicking off this process twice; grabbing, processing messages, saving state is done synchronosly
+      // until the idler has to break
+      store.dispatch(clearMessageQueue(pluginKey, offset));
+      if (
+        !_SandyPluginInstance.is(plugin) &&
+        newPluginState !== persistedState
+      ) {
+        store.dispatch(
+          setPluginState({
+            pluginKey,
+            state: newPluginState,
+          }),
+        );
+      }
+    });
 
     if (idler.isCancelled()) {
       return false;

@@ -8,16 +8,18 @@
  */
 
 import path from 'path';
+import isFB from './isFB';
 
 export const rootDir = path.resolve(__dirname, '..');
 export const appDir = path.join(rootDir, 'app');
 export const staticDir = path.join(rootDir, 'static');
 export const defaultPluginsIndexDir = path.join(staticDir, 'defaultPlugins');
 export const pluginsDir = path.join(rootDir, 'plugins');
-export const headlessDir = path.join(rootDir, 'headless');
+export const fbPluginsDir = path.join(pluginsDir, 'fb');
 export const distDir = path.resolve(rootDir, '..', 'dist');
 export const babelTransformationsDir = path.resolve(
   rootDir,
   'babel-transformer',
   'src',
 );
+export const jsSharedDir = isFB ? path.resolve(rootDir, '../../js-shared') : '';

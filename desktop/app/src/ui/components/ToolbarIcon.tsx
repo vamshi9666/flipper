@@ -8,9 +8,11 @@
  */
 
 import Glyph from './Glyph';
+import Tooltip from './Tooltip';
 import {colors} from './colors';
 import styled from '@emotion/styled';
 import React from 'react';
+import {Tracked} from 'flipper-plugin';
 
 type Props = React.ComponentProps<typeof ToolbarIconContainer> & {
   active?: boolean;
@@ -26,18 +28,22 @@ const ToolbarIconContainer = styled.div({
   position: 'relative', // for settings popover positioning
 });
 
-export default function ToolbarIcon({active, icon, ...props}: Props) {
+export default function ToolbarIcon({active, icon, title, ...props}: Props) {
   return (
-    <ToolbarIconContainer {...props}>
-      <Glyph
-        name={icon}
-        size={16}
-        color={
-          active
-            ? colors.macOSTitleBarIconSelected
-            : colors.macOSTitleBarIconActive
-        }
-      />
-    </ToolbarIconContainer>
+    <Tooltip title={title}>
+      <Tracked action={title}>
+        <ToolbarIconContainer {...props}>
+          <Glyph
+            name={icon}
+            size={16}
+            color={
+              active
+                ? colors.macOSTitleBarIconSelected
+                : colors.macOSTitleBarIconActive
+            }
+          />
+        </ToolbarIconContainer>
+      </Tracked>
+    </Tooltip>
   );
 }

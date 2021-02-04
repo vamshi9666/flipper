@@ -7,27 +7,17 @@
  * @format
  */
 
-import {
-  FlexColumn,
-  Button,
-  styled,
-  Text,
-  FlexRow,
-  Spacer,
-  Input,
-  Link,
-  colors,
-} from 'flipper';
+import {FlexColumn, Button, styled, Text, Input, Link, colors} from '../ui';
 import React, {Component} from 'react';
 import {writeKeychain, getUser} from '../fb-stubs/user';
 import {login} from '../reducers/user';
 import {connect} from 'react-redux';
 import {State as Store} from '../reducers';
-
-const Container = styled(FlexColumn)({
-  padding: 20,
-  width: 500,
-});
+import ContextMenu from '../ui/components/ContextMenu';
+import {clipboard} from 'electron';
+import {reportPlatformFailures} from '../utils/metrics';
+import {Modal} from 'antd';
+import {TrackingScope} from 'flipper-plugin';
 
 const Title = styled(Text)({
   marginBottom: 6,
@@ -67,60 +57,130 @@ class SignInSheet extends Component<Props, State> {
     error: null,
   };
 
-  saveToken = async () => {
-    this.setState({loading: true});
-    const {token} = this.state;
-    if (token) {
-      await writeKeychain(token);
-      try {
-        const user = await getUser();
-        if (user) {
-          this.props.login(user);
-        }
-        this.props.onHide();
-      } catch (error) {
-        console.error(error);
-        this.setState({token: '', loading: false, error: `${error}`});
+  login = async (token: string) => {
+    await writeKeychain(token);
+    const user = await getUser();
+    if (user) {
+      this.props.login(user);
+    } else {
+      throw new Error('Failed to login using the provided token');
+    }
+  };
+
+  saveToken = async (token: string) => {
+    this.setState({token, loading: true});
+    try {
+      await reportPlatformFailures(this.login(token), 'auth:login');
+      this.setState({loading: false});
+      this.props.onHide();
+    } catch (error) {
+      console.error(error);
+      this.setState({
+        loading: false,
+        error: `${error}`,
+      });
+    }
+  };
+
+  onPaste = () => {
+    if (!this.state.token || this.state.token === '') {
+      const token = clipboard.readText();
+      // If pasted content looks like a token, we could try to login using it straight away!
+      if (token && token.length >= 100 && token.indexOf(' ') < 0) {
+        this.saveToken(token);
       }
     }
   };
 
-  render() {
+  signIn = () => {
+    this.saveToken(this.state.token);
+  };
+
+  getContextMenu = () => {
+    const menu: Array<Electron.MenuItemConstructorOptions> = [
+      {
+        label: 'Paste',
+        role: 'paste',
+        click: this.onPaste,
+      },
+      {
+        label: 'Reset',
+        click: this.reset,
+      },
+    ];
+    return menu;
+  };
+
+  reset = () => {
+    this.setState({token: '', error: ''});
+  };
+
+  renderSandyContainer(
+    contents: React.ReactElement,
+    footer: React.ReactElement,
+  ) {
     return (
-      <Container>
+      <TrackingScope scope="logindialog">
+        <Modal
+          visible
+          centered
+          onCancel={this.props.onHide}
+          width={570}
+          title="Login"
+          footer={footer}>
+          <FlexColumn>{contents}</FlexColumn>
+        </Modal>
+      </TrackingScope>
+    );
+  }
+
+  render() {
+    const content = (
+      <>
         <Title>You are not currently logged in to Facebook.</Title>
         <InfoText>
           To log in you will need to{' '}
-          <Link href="https://our.internmc.facebook.com/intern/oauth/nuclide/">
+          <Link href="https://www.internalfb.com/intern/oauth/nuclide/">
             open this page
           </Link>
-          , copy the Nuclide access token you find on that page, and paste it
-          into the text input below.
+          , copy the Nuclide access token you find on that page to clipboard,
+          and click the text input below to paste it.
         </InfoText>
-        <TokenInput
-          disabled={this.state.loading}
-          placeholder="Nuclide Access Token"
-          value={this.state.token}
-          onChange={(e) => this.setState({token: e.target.value})}
-        />
-        <br />
+        <ContextMenu items={this.getContextMenu()}>
+          <TokenInput
+            disabled={this.state.loading}
+            placeholder="Click to paste Nuclide Access Token from clipboard"
+            onClick={this.onPaste}
+            value={this.state.token}
+            onPaste={this.onPaste}
+            onChange={(e) => this.setState({token: e.target.value})}
+          />
+        </ContextMenu>
         {this.state.error && (
-          <InfoText color={colors.red}>
-            <strong>Error:</strong>&nbsp;{this.state.error}
-          </InfoText>
+          <>
+            <br />
+            <InfoText color={colors.red}>
+              <strong>Error:</strong>&nbsp;{this.state.error}
+            </InfoText>
+          </>
         )}
-        <br />
-        <FlexRow>
-          <Spacer />
-          <Button compact padded onClick={this.props.onHide}>
-            Cancel
-          </Button>
-          <Button type="primary" compact padded onClick={this.saveToken}>
-            Sign In
-          </Button>
-        </FlexRow>
-      </Container>
+      </>
     );
+    const footer = (
+      <>
+        <Button compact padded onClick={this.props.onHide}>
+          Cancel
+        </Button>
+        <Button compact padded onClick={this.reset}>
+          Reset
+        </Button>
+        <Button type="primary" compact padded onClick={this.signIn}>
+          Sign In
+        </Button>
+      </>
+    );
+
+    return this.renderSandyContainer(content, footer);
   }
 }
 

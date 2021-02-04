@@ -13,6 +13,7 @@ const VerticalRule = styled.div({
   backgroundColor: '#c9ced4',
   width: 3,
   margin: '0',
+  flexShrink: 0,
 });
 VerticalRule.displayName = 'VerticalRule';
 
